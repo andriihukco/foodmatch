@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { Check, GalleryHorizontalEnd, Heart, Link2, Loader2, RotateCcw, SlidersHorizontal, ThumbsDown, ThumbsUp, Utensils, X } from "lucide-react";
+import { Check, GalleryHorizontalEnd, Heart, Link2, Loader2, RotateCcw, SlidersHorizontal, Sparkles, ThumbsDown, ThumbsUp, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -113,6 +113,12 @@ export default function RoomPage() {
     if (!room) return "";
     if (name === room.user_1_name) return room.user_2_name ?? "партнер";
     return room.user_1_name;
+  }, [name, room]);
+
+  const roomStatus = useMemo(() => {
+    if (!room || !name) return "Шлях до серця лежить через шлунок";
+    if (room.user_2_name === null) return "Запроси свою людину";
+    return `Ти: ${name}`;
   }, [name, room]);
 
   const refreshRoom = useCallback(async () => {
@@ -406,11 +412,11 @@ export default function RoomPage() {
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#58cc02] shadow-[0_4px_0_#46a302]">
-            <Utensils className="h-5 w-5 text-white" />
+            <Sparkles className="h-5 w-5 text-white" />
           </div>
           <div className="min-w-0">
             <h1 className="text-xl font-black leading-tight text-[#25321f]">FoodMatch</h1>
-            <p className="truncate text-xs font-bold text-[#6f7b68]">ID: {room.id}</p>
+            <p className="truncate text-xs font-bold text-[#6f7b68]">{roomStatus}</p>
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -438,7 +444,7 @@ export default function RoomPage() {
       {needsLocalSession ? (
         <Card className="card-duo">
           <CardHeader>
-            <CardTitle className="text-xl font-black">Ця кімната вже має двох гравців</CardTitle>
+            <CardTitle className="text-xl font-black">Ця кімната вже для двох</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 text-sm font-bold text-[#64725d]">
             <p>Посилання саме по собі більше не відкриває чужу сесію. Зайди з пристрою, де створювалась або приєднувалась ця кімната.</p>
@@ -448,23 +454,41 @@ export default function RoomPage() {
       ) : needsJoin ? (
         <Card className="card-duo">
           <CardHeader>
-            <CardTitle className="text-xl font-black">Приєднатися до гри</CardTitle>
+            <CardTitle className="text-xl font-black">Тебе запросили на FoodMatch</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            <p className="text-sm font-bold leading-6 text-[#64725d]">
+              Шлях до твого серця лежить через шлунок. Введи ім&apos;я і свайпайте разом, щоб знайти ваш смачний метч.
+            </p>
             <Input
               value={joinName}
               onChange={(event) => setJoinName(event.target.value)}
-              placeholder="Як тебе звати?"
+              placeholder="Твоє ім'я"
               className="h-12 rounded-2xl border-2"
             />
             <Button onClick={joinRoom} disabled={isJoining} className="btn-duo-green h-12 w-full">
               {isJoining ? <Loader2 className="animate-spin" /> : null}
-              Приєднатися до гри
+              Прийняти інвайт
             </Button>
           </CardContent>
         </Card>
       ) : (
         <Tabs defaultValue="swipe" className="w-full">
+          {room.user_2_name === null ? (
+            <Card className="card-duo">
+              <CardContent className="flex items-center gap-3 p-4">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#e7f8dc] text-[#58a700]">
+                  <Link2 className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-black text-[#25321f]">Інвайт готовий</p>
+                  <p className="text-xs font-bold leading-5 text-[#64725d]">
+                    Надішли посилання своїй людині. Коли вона приєднається, ваші свайпи перетворяться на метчі.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
           <TabsContent value="swipe" className="space-y-4">
             <button
               type="button"

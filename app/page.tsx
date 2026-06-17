@@ -66,7 +66,7 @@ export default function Home() {
           <div className="space-y-3 text-center">
             <h1 className="text-4xl font-black tracking-tight text-[#1f2a1b]">FoodMatch</h1>
             <p className="mx-auto max-w-xs text-base font-bold leading-6 text-[#64725d]">
-              Оберіть страву разом без довгих обговорень.
+              Шлях до твого серця лежить через шлунок. Створіть кімнату і знайдіть страву, яка подобається обом.
             </p>
           </div>
 
@@ -74,7 +74,7 @@ export default function Home() {
             <Input
               value={name}
               onChange={(event) => setName(event.target.value)}
-              placeholder="Як тебе звати?"
+              placeholder="Твоє ім'я"
               className="h-14 rounded-2xl border-2 border-[#d8efc8] bg-white px-4 text-lg font-bold shadow-inner"
             />
             {error ? <p className="text-sm font-bold text-[#ea2b2b]">{error}</p> : null}
@@ -89,12 +89,12 @@ export default function Home() {
               className="btn-duo-green h-14 w-full rounded-2xl text-lg disabled:opacity-60"
             >
               {loading ? <Loader2 className="animate-spin" /> : <ArrowRight className="h-5 w-5" />}
-              Створити кімнату
+              Створити інвайт
             </Button>
           </div>
 
           <p className="mt-5 text-center text-xs font-bold text-[#8a9684]">
-            Запроси партнера посиланням і свайпайте до першого метчу.
+            Надішли посилання своїй людині і свайпайте до першого смачного метчу.
           </p>
         </div>
       </section>

@@ -10,7 +10,7 @@ const nunito = Nunito({
 
 export const metadata: Metadata = {
   title: "FoodMatch",
-  description: "Знаходьте смачні метчі разом",
+  description: "Шлях до серця лежить через шлунок. Знаходьте смачні метчі разом.",
 };
 
 export default function RootLayout({

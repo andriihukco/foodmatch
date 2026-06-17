@@ -1,0 +1,23 @@
+[
+  {
+    "name": "Chicken Caesar Salad",
+    "image_url": "https://images.unsplash.com/photo-1546793665-c74683f339c1",
+    "food_type": "recipe",
+    "meal_type": "lunch",
+    "tags": ["salad", "chicken", "quick"]
+  },
+  {
+    "name": "Margherita Pizza",
+    "image_url": "https://images.unsplash.com/photo-1513104890138-7c749659a591",
+    "food_type": "fastfood",
+    "meal_type": "dinner",
+    "tags": ["pizza", "italian", "cheese"]
+  },
+  {
+    "name": "Greek Yogurt",
+    "image_url": "https://images.unsplash.com/photo-1488477181946-6428a0291777",
+    "food_type": "ingredient",
+    "meal_type": "snack",
+    "tags": ["protein", "healthy", "dairy"]
+  }
+]

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowRight, Check, Cherry, DoorOpen, GalleryHorizontalEnd, Heart, Languages, Link2, Loader2, Plus, RotateCcw, SlidersHorizontal, ThumbsDown, ThumbsUp, Users, X } from "lucide-react";
 
@@ -94,6 +94,15 @@ function dedupeFoods(items: Food[]) {
   });
 }
 
+function shuffleFoods(items: Food[]) {
+  const shuffled = [...items];
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+  }
+  return shuffled;
+}
+
 function isFood(food: Food | undefined): food is Food {
   return Boolean(food);
 }
@@ -171,6 +180,7 @@ function FoodPreviewButton({
 export default function RoomPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const roomId = params.id;
 
   const [room, setRoom] = useState<Room | null>(null);
@@ -205,6 +215,8 @@ export default function RoomPage() {
   const [selectedFood, setSelectedFood] = useState<Food | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
   const [roomsOpen, setRoomsOpen] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
   const [recentMatch, setRecentMatch] = useState<RecentMatch | null>(null);
   const swipedIdsRef = useRef(new Set<string>());
   const myLikesRef = useRef<string[]>([]);
@@ -266,21 +278,31 @@ export default function RoomPage() {
   const loadFilterOptions = useCallback(async () => {
     if (!supabase) return;
 
-    const { data, error: filtersError } = await supabase
-      .from("foods")
-      .select("food_type, meal_type, tags")
-      .in("source", visibleFoodSources)
-      .limit(2000);
+    const allFilterFoods: FilterableFood[] = [];
+    const pageSize = 1000;
 
-    if (filtersError || !data) {
-      setError(filtersError ? formatSupabaseError("Не вдалося завантажити фільтри", filtersError) : "Не вдалося завантажити фільтри.");
-      return;
+    for (let page = 0; ; page += 1) {
+      const from = page * pageSize;
+      const to = from + pageSize - 1;
+      const { data, error: filtersError } = await supabase
+        .from("foods")
+        .select("food_type, meal_type, tags")
+        .in("source", visibleFoodSources)
+        .range(from, to);
+
+      if (filtersError || !data) {
+        setError(filtersError ? formatSupabaseError("Не вдалося завантажити фільтри", filtersError) : "Не вдалося завантажити фільтри.");
+        return;
+      }
+
+      allFilterFoods.push(...(data as FilterableFood[]));
+      if (data.length < pageSize) break;
     }
 
     const foodTypeCounts = new Map<string, number>();
     const dishKindCounts = new Map<string, number>();
 
-    data.forEach((food) => {
+    allFilterFoods.forEach((food) => {
       const typedFood = food as FilterableFood;
       foodTypeFilterOptions.forEach((option) => {
         if (matchesOption(typedFood, option)) {
@@ -429,28 +451,47 @@ export default function RoomPage() {
     setLoadingFoods(true);
     const swipedIds = [...swipedIdsRef.current];
 
-    let query = supabase.from("foods").select("*").in("source", visibleFoodSources).order("created_at", { ascending: false }).limit(36);
+    const pageSize = 36;
     const selectedFoodType = foodTypeFilterOptions.find((option) => option.value === foodTypeFilter);
     const selectedDishKind = dishKindFilterOptions.find((option) => option.value === dishKindFilter);
 
+    let countQuery = supabase.from("foods").select("id", { count: "exact", head: true }).in("source", visibleFoodSources);
+    let query = supabase.from("foods").select("*").in("source", visibleFoodSources);
+
     if (selectedFoodType?.foodTypes) {
+      countQuery = countQuery.in("food_type", selectedFoodType.foodTypes);
       query = query.in("food_type", selectedFoodType.foodTypes);
     }
     if (selectedDishKind?.foodTypes) {
+      countQuery = countQuery.in("food_type", selectedDishKind.foodTypes);
       query = query.in("food_type", selectedDishKind.foodTypes);
     }
     if (selectedDishKind?.mealTypes && !selectedDishKind.tagsAny) {
+      countQuery = countQuery.in("meal_type", selectedDishKind.mealTypes);
       query = query.in("meal_type", selectedDishKind.mealTypes);
     }
     if (selectedDishKind?.tagsAny) {
+      countQuery = countQuery.overlaps("tags", selectedDishKind.tagsAny);
       query = query.overlaps("tags", selectedDishKind.tagsAny);
     }
 
     if (swipedIds.length > 0) {
+      countQuery = countQuery.not("id", "in", `(${swipedIds.join(",")})`);
       query = query.not("id", "in", `(${swipedIds.join(",")})`);
     }
 
-    const { data, error: foodsError } = await query;
+    const { count, error: countError } = await countQuery;
+    if (countError) {
+      setLoadingFoods(false);
+      setError(formatSupabaseError("Не вдалося порахувати картки їжі", countError));
+      return;
+    }
+
+    const availableCount = count ?? 0;
+    const maxOffset = Math.max(availableCount - pageSize, 0);
+    const randomOffset = maxOffset > 0 ? Math.floor(Math.random() * (maxOffset + 1)) : 0;
+
+    const { data, error: foodsError } = await query.range(randomOffset, randomOffset + pageSize - 1);
     setLoadingFoods(false);
 
     if (foodsError || !data) {
@@ -458,7 +499,7 @@ export default function RoomPage() {
       return;
     }
 
-    const incomingFoods = dedupeFoods(data as Food[]);
+    const incomingFoods = shuffleFoods(dedupeFoods(data as Food[]));
     setFoods((prev) => {
       if (mode === "replace") return incomingFoods;
       return dedupeFoods([...prev, ...incomingFoods]);
@@ -470,6 +511,16 @@ export default function RoomPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void refreshRoom();
   }, [refreshRoom]);
+
+  useEffect(() => {
+    if (!room || !name || !isKnownPlayer || searchParams.get("created") !== "1") return;
+    const showOnboarding = window.setTimeout(() => {
+      setOnboardingOpen(true);
+      router.replace(`/room/${room.id}`);
+    }, 0);
+
+    return () => window.clearTimeout(showOnboarding);
+  }, [isKnownPlayer, name, room, router, searchParams]);
 
   useEffect(() => {
     const restoreState = window.setTimeout(() => {
@@ -658,10 +709,11 @@ export default function RoomPage() {
       playerName: trimmedName,
       label: `Room ${roomCode(data.id)}`,
     }));
-    router.push(`/room/${data.id}`);
+    router.push(`/room/${data.id}?created=1`);
   };
 
   const leaveRoom = async () => {
+    setLeaveConfirmOpen(false);
     if (supabase && room && name) {
       setError("");
 
@@ -1333,11 +1385,77 @@ export default function RoomPage() {
             <Button
               type="button"
               variant="outline"
-              onClick={() => void leaveRoom()}
+              onClick={() => setLeaveConfirmOpen(true)}
               className="h-12 rounded-2xl border-2 border-[#ffd1d8] text-base font-black text-[#be123c]"
             >
               <DoorOpen className="h-5 w-5" />
               Вийти з цієї кімнати
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={onboardingOpen} onOpenChange={setOnboardingOpen}>
+        <DialogContent
+          showCloseButton={false}
+          className="bottom-0 left-0 top-auto z-50 w-full max-w-none translate-x-0 translate-y-0 gap-4 rounded-b-none rounded-t-[2rem] border-2 border-[#ffd1d8] bg-white p-5 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-[0_-10px_36px_rgba(154,25,42,0.10)] sm:left-1/2 sm:max-w-md sm:-translate-x-1/2 sm:rounded-b-[2rem]"
+        >
+          <DialogHeader>
+            <div className="mx-auto h-1.5 w-12 rounded-full bg-[#ffd1d8]" />
+            <DialogTitle className="pt-2 text-center text-2xl font-black text-[#351316]">Кімната готова</DialogTitle>
+            <DialogDescription className="mx-auto max-w-xs text-center text-sm font-bold leading-6 text-[#7a3a43]">
+              Скопіюй інвайт і надішли партнеру. Коли він зайде, ви зможете свайпати одну й ту саму добірку.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <Button
+              type="button"
+              onClick={() => void copyLink()}
+              className="btn-duo-primary h-12 rounded-2xl text-base font-black"
+            >
+              {copiedLink ? <Check /> : <Link2 />}
+              {copiedLink ? "Посилання скопійовано" : "Скопіювати інвайт"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setOnboardingOpen(false)}
+              className="h-12 rounded-2xl border-2 border-[#ffd1d8] text-base font-black text-[#be123c]"
+            >
+              Почати свайпати
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={leaveConfirmOpen} onOpenChange={setLeaveConfirmOpen}>
+        <DialogContent
+          showCloseButton={false}
+          className="bottom-0 left-0 top-auto z-50 w-full max-w-none translate-x-0 translate-y-0 gap-4 rounded-b-none rounded-t-[2rem] border-2 border-[#ffd1d8] bg-white p-5 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-[0_-10px_36px_rgba(154,25,42,0.10)] sm:left-1/2 sm:max-w-md sm:-translate-x-1/2 sm:rounded-b-[2rem]"
+        >
+          <DialogHeader>
+            <div className="mx-auto h-1.5 w-12 rounded-full bg-[#ffd1d8]" />
+            <DialogTitle className="pt-2 text-center text-2xl font-black text-[#351316]">Вийти з кімнати?</DialogTitle>
+            <DialogDescription className="mx-auto max-w-xs text-center text-sm font-bold leading-6 text-[#7a3a43]">
+              Твої свайпи в цій кімнаті очистяться на цьому кроці.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <Button
+              type="button"
+              onClick={() => void leaveRoom()}
+              className="btn-duo-danger h-12 rounded-2xl text-base font-black"
+            >
+              <DoorOpen />
+              Так, вийти
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setLeaveConfirmOpen(false)}
+              className="h-12 rounded-2xl border-2 border-[#ffd1d8] text-base font-black text-[#be123c]"
+            >
+              Залишитись
             </Button>
           </div>
         </DialogContent>

@@ -68,7 +68,7 @@ export default function Home() {
       playerName: trimmedName,
       label: `Room ${data.id.slice(0, 6).toUpperCase()}`,
     });
-    router.push(`/room/${data.id}`);
+    router.push(`/room/${data.id}?created=1`);
   };
 
   return (

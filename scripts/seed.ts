@@ -498,8 +498,51 @@ async function insertRows(rows: FoodInsert[], batchSize: number) {
     console.warn("Supabase foods import columns are missing; inserting legacy food rows without source/ingredients.");
   }
 
-  for (let index = 0; index < rows.length; index += batchSize) {
-    const batch = rows.slice(index, index + batchSize);
+  let insertableRows = rows;
+  if (supportsImportColumns) {
+    const existingResponse = await fetch(`${supabaseUrl}/rest/v1/foods?select=source,external_id&source=not.is.null&external_id=not.is.null&limit=20000`, {
+      headers: {
+        apikey: supabaseAnonKey,
+        authorization: `Bearer ${supabaseAnonKey}`,
+      },
+    });
+
+    if (!existingResponse.ok) {
+      const body = await existingResponse.text();
+      throw new Error(`Supabase duplicate check failed: ${existingResponse.status} ${body}`);
+    }
+
+    const existingRows = (await existingResponse.json()) as Array<{ source: string | null; external_id: string | null }>;
+    const seenKeys = new Set(
+      existingRows
+        .filter((row) => row.source && row.external_id)
+        .map((row) => `${row.source}:${row.external_id}`),
+    );
+    const skippedDuplicates: FoodInsert[] = [];
+
+    insertableRows = rows.filter((row) => {
+      if (!row.source || !row.external_id) return true;
+      const key = `${row.source}:${row.external_id}`;
+      if (seenKeys.has(key)) {
+        skippedDuplicates.push(row);
+        return false;
+      }
+      seenKeys.add(key);
+      return true;
+    });
+
+    if (skippedDuplicates.length > 0) {
+      console.log(`Skipped ${skippedDuplicates.length} duplicate foods already present in Supabase or this seed batch.`);
+    }
+  }
+
+  if (insertableRows.length === 0) {
+    console.log("No new foods to insert.");
+    return;
+  }
+
+  for (let index = 0; index < insertableRows.length; index += batchSize) {
+    const batch = insertableRows.slice(index, index + batchSize);
     const payload = supportsImportColumns
       ? batch
       : batch.map(({ name, image_url, food_type, meal_type, tags }) => ({
@@ -582,7 +625,7 @@ async function main() {
   }
 
   await insertRows(translatedRows, batchSize);
-  console.log(`Seeded ${translatedRows.length} foods from ${source}.`);
+  console.log(`Seeded ${translatedRows.length} parsed foods from ${source}.`);
 }
 
 void main();

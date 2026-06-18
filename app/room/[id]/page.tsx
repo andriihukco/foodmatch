@@ -121,42 +121,6 @@ function matchesOption(food: FilterableFood, option: FilterOption | undefined) {
   return !option.mealTypes && !option.tagsAny;
 }
 
-function RoomRosterCard({ room, activeName }: { room: Room; activeName: string }) {
-  const members = [
-    { label: room.user_1_name, role: "Creator" },
-    { label: room.user_2_name ?? "Очікуємо партнера", role: "Partner" },
-  ];
-
-  return (
-    <Card className="card-duo">
-      <CardContent className="space-y-3 p-4">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-xs font-black uppercase tracking-[0.14em] text-[#9f5660]">Room {roomCode(room.id)}</p>
-            <p className="text-base font-black text-[#351316]">{roomMemberLine(room)}</p>
-          </div>
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#fff1f3] text-[#be123c]">
-            <Users className="h-5 w-5" />
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          {members.map((member) => (
-            <div
-              key={member.role}
-              className={`min-w-0 rounded-2xl border-2 px-3 py-2 ${
-                member.label === activeName ? "border-[#e11d48] bg-[#fff1f3]" : "border-[#ffe4e8] bg-[#fff7f8]"
-              }`}
-            >
-              <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#9f5660]">{member.role}</p>
-              <p className="truncate text-sm font-black text-[#351316]">{member.label}</p>
-            </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 function FoodPreviewButton({
   food,
   translatedText,
@@ -227,6 +191,8 @@ export default function RoomPage() {
   const [roomsOpen, setRoomsOpen] = useState(false);
   const [recentMatch, setRecentMatch] = useState<RecentMatch | null>(null);
   const swipedIdsRef = useRef(new Set<string>());
+  const myLikesRef = useRef<string[]>([]);
+  const cardDragRef = useRef(false);
 
   const isKnownPlayer = useMemo(() => {
     if (!room || !name) return false;
@@ -371,6 +337,26 @@ export default function RoomPage() {
     }
   }, []);
 
+  const checkPartnerLike = useCallback(async (food: Food) => {
+    if (!room || !name || !supabase) return false;
+
+    const { data, error: matchError } = await supabase
+      .from("swipes")
+      .select("id")
+      .eq("room_id", room.id)
+      .eq("food_id", food.id)
+      .eq("action", "like")
+      .neq("user_name", name)
+      .limit(1);
+
+    if (matchError) {
+      setError(formatSupabaseError("Не вдалося перевірити метч", matchError));
+      return false;
+    }
+
+    return (data ?? []).length > 0;
+  }, [name, room]);
+
   const loadSwipes = useCallback(async () => {
     if (!room || !name || !supabase) return false;
     const { data, error: swipesError } = await supabase
@@ -505,7 +491,7 @@ export default function RoomPage() {
         async (payload) => {
           const swipe = payload.new as { food_id: string; user_name: string; action: SwipeAction };
           if (swipe.user_name === name) return;
-          if (swipe.action === "like" && myLikes.includes(swipe.food_id)) {
+          if (swipe.action === "like" && myLikesRef.current.includes(swipe.food_id)) {
             const food = await loadFoodById(swipe.food_id);
             if (food) showMatch(food, "partner");
           }
@@ -517,7 +503,11 @@ export default function RoomPage() {
     return () => {
       void supabaseClient.removeChannel(channel);
     };
-  }, [loadFoodById, loadSwipes, myLikes, name, room, showMatch]);
+  }, [loadFoodById, loadSwipes, name, room, showMatch]);
+
+  useEffect(() => {
+    myLikesRef.current = myLikes;
+  }, [myLikes]);
 
   useEffect(() => {
     if (!recentMatch) return;
@@ -736,7 +726,7 @@ export default function RoomPage() {
       return;
     }
 
-    if (action === "like" && theirLikes.includes(food.id)) {
+    if (action === "like" && (theirLikes.includes(food.id) || await checkPartnerLike(food))) {
       showMatch(food, "mine");
     }
 
@@ -746,6 +736,21 @@ export default function RoomPage() {
       void loadFoods("append");
     }
     setSwipingFoodId(null);
+  };
+
+  const handleCardDragEnd = (food: Food, offsetX: number, velocityX: number) => {
+    window.setTimeout(() => {
+      cardDragRef.current = false;
+    }, 0);
+
+    if (swipingFoodId !== null) return;
+    if (offsetX > 92 || velocityX > 520) {
+      void swipe(food, "like");
+      return;
+    }
+    if (offsetX < -92 || velocityX < -520) {
+      void swipe(food, "dislike");
+    }
   };
 
   const undoLastSwipe = async () => {
@@ -836,7 +841,7 @@ export default function RoomPage() {
 
   return (
     <main className="mx-auto flex min-h-[100svh] w-full max-w-md flex-col gap-3 bg-[#fff5f6] px-3 py-3 pb-[calc(6.25rem+env(safe-area-inset-bottom))] text-[#351316] sm:px-4">
-      <div className="flex items-center justify-between gap-3">
+      {!needsJoin ? <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#e11d48] shadow-[0_3px_0_#f8cbd2]">
             <Cherry className="h-5 w-5 text-white" />
@@ -872,7 +877,7 @@ export default function RoomPage() {
             {hasActiveFilters ? <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-[#ff4b4b]" /> : null}
           </Button>
         </div>
-      </div>
+      </div> : null}
       {needsLocalSession ? (
         <Card className="card-duo">
           <CardHeader>
@@ -884,24 +889,22 @@ export default function RoomPage() {
           </CardContent>
         </Card>
       ) : needsJoin ? (
-        <Card className="card-duo overflow-hidden">
-          <CardHeader className="items-center text-center">
-            <div className="mb-1 flex h-16 w-16 items-center justify-center rounded-[1.35rem] bg-[#e11d48] text-white shadow-[0_4px_0_#f8cbd2]">
-              <Cherry className="h-8 w-8" />
-            </div>
-            <CardTitle className="text-2xl font-black">FoodMatch інвайт</CardTitle>
+        <Card className="card-duo mt-6 overflow-hidden">
+          <CardHeader className="text-left">
+            <p className="text-xs font-black uppercase tracking-[0.14em] text-[#9f5660]">Room {roomCode(room.id)}</p>
+            <CardTitle className="text-2xl font-black leading-tight">Запрошення від {room.user_1_name}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <p className="text-center text-sm font-bold leading-6 text-[#7a3a43]">
-              Шлях до твого серця лежить через шлунок. Введи ім&apos;я і свайпайте разом, щоб знайти ваш смачний метч.
+            <p className="text-sm font-bold leading-6 text-[#7a3a43]">
+              Введи ім&apos;я, щоб приєднатись до кімнати і почати свайпати разом.
             </p>
             <Input
               value={joinName}
               onChange={(event) => setJoinName(event.target.value)}
               placeholder="Твоє ім'я"
-              className="h-12 rounded-2xl border-2"
+              className="h-12 rounded-2xl border-2 border-[#ffd1d8] text-base font-bold"
             />
-            <Button onClick={joinRoom} disabled={isJoining} className="btn-duo-primary h-12 w-full">
+            <Button onClick={joinRoom} disabled={isJoining} className="btn-duo-primary h-12 w-full rounded-2xl text-base">
               {isJoining ? <Loader2 className="animate-spin" /> : null}
               Прийняти інвайт
             </Button>
@@ -923,97 +926,98 @@ export default function RoomPage() {
             </button>
 
             {topCard ? (
-              <AnimatePresence mode="wait" onExitComplete={() => setSwipeDirection(null)}>
-                <motion.div
-                  key={topCard.id}
-                  initial={{ opacity: 0, y: 18, scale: 0.98 }}
-                  animate={{ opacity: 1, y: 0, x: 0, rotate: 0, scale: 1 }}
-                  exit={{
-                    opacity: 0,
-                    x: swipeDirection === null ? 0 : swipeDirection === "like" ? 420 : -420,
-                    rotate: swipeDirection === null ? 0 : swipeDirection === "like" ? 16 : -16,
-                    scale: 0.94,
-                  }}
-                  transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setSelectedFood(topCard)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
+              <div className="space-y-3">
+                <AnimatePresence mode="wait" onExitComplete={() => setSwipeDirection(null)}>
+                  <motion.div
+                    key={topCard.id}
+                    drag="x"
+                    dragConstraints={{ left: 0, right: 0 }}
+                    dragElastic={0.28}
+                    onDragStart={() => {
+                      cardDragRef.current = true;
+                    }}
+                    onDragEnd={(_, info) => handleCardDragEnd(topCard, info.offset.x, info.velocity.x)}
+                    initial={{ opacity: 0, y: 18, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, x: 0, rotate: 0, scale: 1 }}
+                    exit={{
+                      opacity: 0,
+                      x: swipeDirection === null ? 0 : swipeDirection === "like" ? 420 : -420,
+                      rotate: swipeDirection === null ? 0 : swipeDirection === "like" ? 16 : -16,
+                      scale: 0.94,
+                    }}
+                    transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => {
+                      if (cardDragRef.current) return;
                       setSelectedFood(topCard);
-                    }
-                  }}
-                  className="relative flex h-[clamp(430px,calc(100svh-150px),680px)] cursor-pointer flex-col overflow-hidden rounded-[1.8rem] border-2 border-[#ffd1d8] bg-white shadow-[0_4px_0_#ffe9ed]"
-                >
-                  {(topCard.name || topCard.ingredients || topCard.instructions) ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={translatingFoodId === topCard.id || Boolean(translatedFoods[topCard.id])}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void translateFood(topCard);
-                      }}
-                      className="absolute right-3 top-3 z-10 h-11 w-11 rounded-full border-2 border-white/80 bg-white/95 p-0 text-[#be123c] shadow-[0_4px_14px_rgba(154,25,42,0.10)]"
-                      aria-label="Перекласти картку"
-                    >
-                      {translatingFoodId === topCard.id ? <Loader2 className="h-5 w-5 animate-spin" /> : <Languages className="h-5 w-5" />}
-                    </Button>
-                  ) : null}
-                  {topCard.image_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={topCard.image_url} alt={topCard.name} className="min-h-0 flex-1 object-cover" />
-                  ) : (
-                    <div className="flex min-h-0 flex-1 items-center justify-center bg-[#fff1f3] text-6xl">🍽️</div>
-                  )}
-                  <div className="shrink-0 space-y-3 p-4">
-                    <div className="space-y-1.5">
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setSelectedFood(topCard);
+                      }
+                    }}
+                    className="relative flex h-[clamp(320px,calc(100svh-286px),560px)] touch-pan-y cursor-grab flex-col overflow-hidden rounded-[1.8rem] border-2 border-[#ffd1d8] bg-white shadow-[0_4px_0_#ffe9ed] active:cursor-grabbing"
+                  >
+                    {(topCard.name || topCard.ingredients || topCard.instructions) ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={translatingFoodId === topCard.id || Boolean(translatedFoods[topCard.id])}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void translateFood(topCard);
+                        }}
+                        className="absolute right-3 top-3 z-10 h-11 w-11 rounded-full border-2 border-white/80 bg-white/95 p-0 text-[#be123c] shadow-[0_4px_14px_rgba(154,25,42,0.10)]"
+                        aria-label="Перекласти картку"
+                      >
+                        {translatingFoodId === topCard.id ? <Loader2 className="h-5 w-5 animate-spin" /> : <Languages className="h-5 w-5" />}
+                      </Button>
+                    ) : null}
+                    {topCard.image_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={topCard.image_url} alt={topCard.name} className="min-h-0 flex-1 object-cover" />
+                    ) : (
+                      <div className="flex min-h-0 flex-1 items-center justify-center bg-[#fff1f3] text-6xl">🍽️</div>
+                    )}
+                    <div className="shrink-0 space-y-1.5 p-4">
                       <h2 className="line-clamp-2 text-2xl font-black leading-tight text-[#351316]">{topCardText?.name}</h2>
                       {topCardText?.ingredients ? (
                         <p className="line-clamp-1 text-sm font-bold leading-5 text-[#7a3a43]">{topCardText.ingredients}</p>
                       ) : null}
                     </div>
-                    <div className="flex items-center justify-center gap-4 pt-1">
-                      <Button
-                        disabled={!topCard || swipingFoodId !== null}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void swipe(topCard, "dislike");
-                        }}
-                        className="btn-duo-danger h-16 w-16 rounded-full p-0 text-2xl shadow-[0_5px_16px_rgba(255,75,75,0.12)] disabled:bg-[#b7b7b7] disabled:border-[#929292]"
-                        aria-label="Не хочу"
-                      >
-                        <ThumbsDown className="h-7 w-7" />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        disabled={!lastSwipe || swipingFoodId !== null}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void undoLastSwipe();
-                        }}
-                        className="h-12 w-12 rounded-full border-2 border-[#ffd1d8] bg-white p-0 text-[#7a3a43] shadow-[0_3px_0_#ffe9ed] disabled:opacity-40"
-                        aria-label="Назад"
-                      >
-                        <RotateCcw className="h-5 w-5" />
-                      </Button>
-                      <Button
-                        disabled={!topCard || swipingFoodId !== null}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void swipe(topCard, "like");
-                        }}
-                        className="btn-duo-primary h-16 w-16 rounded-full p-0 text-2xl shadow-[0_5px_16px_rgba(225,29,72,0.12)] disabled:bg-[#b7b7b7] disabled:border-[#929292]"
-                        aria-label="Хочу"
-                      >
-                        <ThumbsUp className="h-7 w-7" />
-                      </Button>
-                    </div>
-                  </div>
-                </motion.div>
-              </AnimatePresence>
+                  </motion.div>
+                </AnimatePresence>
+                <div className="flex items-center justify-center gap-4">
+                  <Button
+                    disabled={!topCard || swipingFoodId !== null}
+                    onClick={() => void swipe(topCard, "dislike")}
+                    className="btn-duo-danger h-16 w-16 rounded-full p-0 text-2xl shadow-[0_5px_16px_rgba(255,75,75,0.12)] disabled:bg-[#b7b7b7] disabled:border-[#929292]"
+                    aria-label="Не хочу"
+                  >
+                    <ThumbsDown className="h-7 w-7" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={!lastSwipe || swipingFoodId !== null}
+                    onClick={() => void undoLastSwipe()}
+                    className="h-12 w-12 rounded-full border-2 border-[#ffd1d8] bg-white p-0 text-[#7a3a43] shadow-[0_3px_0_#ffe9ed] disabled:opacity-40"
+                    aria-label="Назад"
+                  >
+                    <RotateCcw className="h-5 w-5" />
+                  </Button>
+                  <Button
+                    disabled={!topCard || swipingFoodId !== null}
+                    onClick={() => void swipe(topCard, "like")}
+                    className="btn-duo-primary h-16 w-16 rounded-full p-0 text-2xl shadow-[0_5px_16px_rgba(225,29,72,0.12)] disabled:bg-[#b7b7b7] disabled:border-[#929292]"
+                    aria-label="Хочу"
+                  >
+                    <ThumbsUp className="h-7 w-7" />
+                  </Button>
+                </div>
+              </div>
             ) : (
               <Card className="rounded-[2rem] border-2 border-dashed border-[#badea8] bg-white shadow-[0_4px_0_#edf8e6]">
                 <CardContent className="space-y-3 py-10 text-center">
@@ -1193,57 +1197,48 @@ export default function RoomPage() {
           </DialogHeader>
 
           <div className="space-y-3 overflow-y-auto">
-            <RoomRosterCard room={room} activeName={name || joinName} />
-            {room.user_2_name === null ? (
-              <div className="rounded-3xl border-2 border-[#ffd1d8] bg-[#fff8f9] p-4">
-                <div className="flex items-start gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white text-[#be123c]">
-                    <Link2 className="h-5 w-5" />
-                  </div>
-                  <div className="min-w-0 space-y-3">
-                    <div>
-                      <p className="text-sm font-black text-[#351316]">Інвайт готовий</p>
-                      <p className="text-xs font-bold leading-5 text-[#7a3a43]">
-                        Надішли посилання своїй людині. Коли вона приєднається, ваші свайпи перетворяться на метчі.
-                      </p>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={copyLink}
-                      className="h-11 rounded-2xl border-2 border-[#ffd1d8] bg-white px-4 font-black text-[#be123c]"
-                    >
-                      {copiedLink ? <Check className="h-5 w-5" /> : <Link2 className="h-5 w-5" />}
-                      {copiedLink ? "Скопійовано" : "Скопіювати інвайт"}
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            ) : null}
-
             {savedRooms.length > 0 ? (
               savedRooms.map((savedRoom) => {
                 const savedRoomDetail = savedRoomDetails[savedRoom.id];
+                const isActiveRoom = savedRoom.id === roomId;
+                if (isActiveRoom) {
+                  return (
+                    <div
+                      key={savedRoom.id}
+                      className="flex w-full items-center justify-between gap-3 rounded-2xl border-2 border-[#e11d48] bg-[#fff1f3] p-3 text-left"
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-black text-[#351316]">Room {roomCode(savedRoom.id)}</span>
+                        <span className="block truncate text-xs font-bold text-[#9f5660]">{roomMemberLine(savedRoomDetail, savedRoom.playerName)}</span>
+                      </span>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={copyLink}
+                          className="h-10 rounded-2xl border-2 border-[#ffd1d8] bg-white px-3 font-black text-[#be123c]"
+                        >
+                          {copiedLink ? <Check className="h-4 w-4" /> : <Link2 className="h-4 w-4" />}
+                          Інвайт
+                        </Button>
+                        <Check className="h-5 w-5 text-[#e11d48]" />
+                      </div>
+                    </div>
+                  );
+                }
+
                 return (
                   <button
                     key={savedRoom.id}
                     type="button"
                     onClick={() => switchRoom(savedRoom.id)}
-                    className={`flex w-full items-center justify-between gap-3 rounded-2xl border-2 p-3 text-left transition ${
-                      savedRoom.id === roomId
-                        ? "border-[#e11d48] bg-[#fff1f3]"
-                        : "border-[#ffd1d8] bg-white hover:bg-[#fff7f8]"
-                    }`}
+                    className="flex w-full items-center justify-between gap-3 rounded-2xl border-2 border-[#ffd1d8] bg-white p-3 text-left transition hover:bg-[#fff7f8]"
                   >
                     <span className="min-w-0">
                       <span className="block truncate text-sm font-black text-[#351316]">Room {roomCode(savedRoom.id)}</span>
                       <span className="block truncate text-xs font-bold text-[#9f5660]">{roomMemberLine(savedRoomDetail, savedRoom.playerName)}</span>
                     </span>
-                    {savedRoom.id === roomId ? (
-                      <Check className="h-5 w-5 shrink-0 text-[#e11d48]" />
-                    ) : (
-                      <ArrowRight className="h-5 w-5 shrink-0 text-[#be123c]" />
-                    )}
+                    <ArrowRight className="h-5 w-5 shrink-0 text-[#be123c]" />
                   </button>
                 );
               })

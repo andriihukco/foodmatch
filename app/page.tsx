@@ -63,8 +63,8 @@ export default function Home() {
         <div className="absolute -left-14 -top-16 h-40 w-40 rounded-full bg-[#ffd1d8] blur-2xl" />
         <div className="absolute -bottom-16 -right-14 h-44 w-44 rounded-full bg-[#ffe3b3] blur-2xl" />
 
-        <div className="relative overflow-hidden rounded-[2.25rem] border border-white/80 bg-white/90 p-6 shadow-[0_24px_80px_rgba(154,25,42,0.16)] backdrop-blur-xl">
-          <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-[1.65rem] bg-[#e11d48] shadow-[0_10px_0_#9f1239]">
+        <div className="relative overflow-hidden rounded-[2.25rem] border border-white/80 bg-white/90 p-6 shadow-[0_18px_54px_rgba(154,25,42,0.10)] backdrop-blur-xl">
+          <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-[1.65rem] bg-[#e11d48] shadow-[0_5px_0_#f8cbd2]">
             <Cherry className="h-9 w-9 text-white" />
           </div>
 

@@ -25,10 +25,11 @@ type RoomMap = Record<string, Room>;
 type FilterValue = string;
 type SwipeDirection = SwipeAction | null;
 type LastSwipe = { food: Food; action: SwipeAction } | null;
-type FilterOption = { value: string; label: string; count?: number };
+type FilterOption = { value: string; label: string; count?: number; foodTypes?: string[]; tagsAny?: string[]; mealTypes?: string[] };
+type FilterableFood = Pick<Food, "food_type" | "meal_type" | "tags">;
 type FoodFilterOptions = {
-  mealTypes: FilterOption[];
-  mealKinds: FilterOption[];
+  foodTypes: FilterOption[];
+  dishKinds: FilterOption[];
 };
 type TranslatedFoodText = {
   name: string | null;
@@ -41,32 +42,31 @@ type RecentMatch = {
 };
 
 const allFilterOption: FilterOption = { value: "all", label: "Усі" };
-const mealTypeLabels: Record<string, string> = {
-  breakfast: "Сніданок",
-  lunch: "Обід",
-  dinner: "Вечеря",
-  snack: "Снек",
-};
-const mealKindLabels: Record<string, string> = {
-  beef: "Яловичина",
-  breakfast: "Сніданки",
-  chicken: "Курка",
-  dessert: "Десерти",
-  goat: "Козлятина",
-  lamb: "Баранина",
-  miscellaneous: "Різне",
-  pasta: "Паста",
-  pork: "Свинина",
-  seafood: "Морепродукти",
-  side: "Гарніри",
-  starter: "Закуски",
-  vegan: "Веганське",
-  vegetarian: "Вегетаріанське",
-};
-const mealKindValues = Object.keys(mealKindLabels);
+const foodTypeFilterOptions: FilterOption[] = [
+  allFilterOption,
+  { value: "meals", label: "Страви", foodTypes: ["recipe", "fastfood", "product"] },
+  { value: "ingredients", label: "Інгредієнти", foodTypes: ["ingredient"] },
+];
+const dishKindFilterOptions: FilterOption[] = [
+  allFilterOption,
+  {
+    value: "main",
+    label: "Основні",
+    tagsAny: ["beef", "chicken", "goat", "lamb", "pork", "seafood", "pasta", "vegan", "vegetarian"],
+    foodTypes: ["recipe", "fastfood", "product"],
+  },
+  { value: "dessert", label: "Десерти", tagsAny: ["dessert"] },
+  { value: "snack", label: "Снеки", mealTypes: ["snack"] },
+  { value: "soup", label: "Супи", tagsAny: ["soup", "soups"] },
+  { value: "starter", label: "Закуски", tagsAny: ["starter"] },
+  { value: "side", label: "Гарніри", tagsAny: ["side"] },
+  { value: "pasta", label: "Паста", tagsAny: ["pasta"] },
+  { value: "seafood", label: "Морепродукти", tagsAny: ["seafood"] },
+  { value: "vegetarian", label: "Вегетаріанське", tagsAny: ["vegetarian", "vegan"] },
+];
 const initialFilterOptions: FoodFilterOptions = {
-  mealTypes: [allFilterOption],
-  mealKinds: [allFilterOption],
+  foodTypes: foodTypeFilterOptions,
+  dishKinds: dishKindFilterOptions,
 };
 
 const visibleFoodSources = ["themealdb-ingredient-list", "themealdb-meal-list"];
@@ -86,28 +86,6 @@ function isFood(food: Food | undefined): food is Food {
 
 function optionLabel(options: FilterOption[], value: string) {
   return options.find((option) => option.value === value)?.label ?? "";
-}
-
-function prettyLabel(value: string) {
-  return value
-    .replace(/[_-]+/g, " ")
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
-    .join(" ");
-}
-
-function sortedOptions(values: Map<string, number>, labels: Record<string, string> = {}) {
-  return [
-    allFilterOption,
-    ...[...values.entries()]
-      .sort((first, second) => second[1] - first[1] || first[0].localeCompare(second[0]))
-      .map(([value, count]) => ({
-        value,
-        label: labels[value] ?? prettyLabel(value),
-        count,
-      })),
-  ];
 }
 
 function getFoodText(food: Food, translatedText: TranslatedFoodText | undefined) {
@@ -133,6 +111,14 @@ function roomMemberLine(room: Room | undefined, fallbackName?: string) {
     return members.length === 1 ? `${members[0]} + очікуємо партнера` : members.join(" + ");
   }
   return fallbackName ? `${fallbackName} + очікуємо партнера` : "Очікуємо гравців";
+}
+
+function matchesOption(food: FilterableFood, option: FilterOption | undefined) {
+  if (!option || option.value === "all") return true;
+  if (option.foodTypes && (!food.food_type || !option.foodTypes.includes(food.food_type))) return false;
+  if (option.mealTypes?.includes(food.meal_type ?? "")) return true;
+  if (option.tagsAny?.some((tag) => (food.tags ?? []).includes(tag))) return true;
+  return !option.mealTypes && !option.tagsAny;
 }
 
 function RoomRosterCard({ room, activeName }: { room: Room; activeName: string }) {
@@ -218,8 +204,8 @@ export default function RoomPage() {
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
   const [loadingRoom, setLoadingRoom] = useState(true);
   const [loadingFoods, setLoadingFoods] = useState(false);
-  const [mealTypeFilter, setMealTypeFilter] = useState<FilterValue>("all");
-  const [mealKindFilter, setMealKindFilter] = useState<FilterValue>("all");
+  const [foodTypeFilter, setFoodTypeFilter] = useState<FilterValue>("all");
+  const [dishKindFilter, setDishKindFilter] = useState<FilterValue>("all");
   const [filterOptions, setFilterOptions] = useState<FoodFilterOptions>(initialFilterOptions);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [foods, setFoods] = useState<Food[]>([]);
@@ -310,21 +296,26 @@ export default function RoomPage() {
       return;
     }
 
-    const mealTypes = new Map<string, number>();
-    const mealKinds = new Map<string, number>();
+    const foodTypeCounts = new Map<string, number>();
+    const dishKindCounts = new Map<string, number>();
 
     data.forEach((food) => {
-      if (food.meal_type) mealTypes.set(food.meal_type, (mealTypes.get(food.meal_type) ?? 0) + 1);
-      ((food.tags ?? []) as string[]).forEach((tag) => {
-        if (mealKindValues.includes(tag)) {
-          mealKinds.set(tag, (mealKinds.get(tag) ?? 0) + 1);
+      const typedFood = food as FilterableFood;
+      foodTypeFilterOptions.forEach((option) => {
+        if (matchesOption(typedFood, option)) {
+          foodTypeCounts.set(option.value, (foodTypeCounts.get(option.value) ?? 0) + 1);
+        }
+      });
+      dishKindFilterOptions.forEach((option) => {
+        if (matchesOption(typedFood, option)) {
+          dishKindCounts.set(option.value, (dishKindCounts.get(option.value) ?? 0) + 1);
         }
       });
     });
 
     setFilterOptions({
-      mealTypes: sortedOptions(mealTypes, mealTypeLabels),
-      mealKinds: sortedOptions(mealKinds, mealKindLabels),
+      foodTypes: foodTypeFilterOptions.map((option) => ({ ...option, count: option.value === "all" ? undefined : foodTypeCounts.get(option.value) })),
+      dishKinds: dishKindFilterOptions.map((option) => ({ ...option, count: option.value === "all" ? undefined : dishKindCounts.get(option.value) })),
     });
   }, []);
 
@@ -438,11 +429,20 @@ export default function RoomPage() {
     const swipedIds = [...swipedIdsRef.current];
 
     let query = supabase.from("foods").select("*").in("source", visibleFoodSources).order("created_at", { ascending: false }).limit(36);
-    if (mealTypeFilter !== "all") {
-      query = query.eq("meal_type", mealTypeFilter);
+    const selectedFoodType = foodTypeFilterOptions.find((option) => option.value === foodTypeFilter);
+    const selectedDishKind = dishKindFilterOptions.find((option) => option.value === dishKindFilter);
+
+    if (selectedFoodType?.foodTypes) {
+      query = query.in("food_type", selectedFoodType.foodTypes);
     }
-    if (mealKindFilter !== "all") {
-      query = query.contains("tags", [mealKindFilter]);
+    if (selectedDishKind?.foodTypes) {
+      query = query.in("food_type", selectedDishKind.foodTypes);
+    }
+    if (selectedDishKind?.mealTypes && !selectedDishKind.tagsAny) {
+      query = query.in("meal_type", selectedDishKind.mealTypes);
+    }
+    if (selectedDishKind?.tagsAny) {
+      query = query.overlaps("tags", selectedDishKind.tagsAny);
     }
 
     if (swipedIds.length > 0) {
@@ -463,7 +463,7 @@ export default function RoomPage() {
       return dedupeFoods([...prev, ...incomingFoods]);
     });
     mergeFoodsIntoMap(incomingFoods);
-  }, [mealKindFilter, mealTypeFilter, mergeFoodsIntoMap, name, room]);
+  }, [dishKindFilter, foodTypeFilter, mergeFoodsIntoMap, name, room]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -536,8 +536,8 @@ export default function RoomPage() {
   };
 
   const clearFilters = () => {
-    setMealTypeFilter("all");
-    setMealKindFilter("all");
+    setFoodTypeFilter("all");
+    setDishKindFilter("all");
   };
 
   const joinRoom = async () => {
@@ -812,9 +812,11 @@ export default function RoomPage() {
   const needsLocalSession = !isKnownPlayer && room.user_2_name !== null;
   const topCard = foods[0];
   const matches = dedupeFoods(myLikes.filter((foodId) => theirLikes.includes(foodId)).map((foodId) => foodMap[foodId]).filter(isFood));
+  const activeFoodTypeOption = filterOptions.foodTypes.find((option) => option.value === foodTypeFilter);
+  const activeDishKindOption = filterOptions.dishKinds.find((option) => option.value === dishKindFilter);
   const matchesActiveFilters = (food: Food) => {
-    if (mealTypeFilter !== "all" && food.meal_type !== mealTypeFilter) return false;
-    if (mealKindFilter !== "all" && !food.tags.includes(mealKindFilter)) return false;
+    if (!matchesOption(food, activeFoodTypeOption)) return false;
+    if (!matchesOption(food, activeDishKindOption)) return false;
     return true;
   };
   const filteredMatches = matches.filter(matchesActiveFilters);
@@ -822,10 +824,10 @@ export default function RoomPage() {
   const theirWants = theirLikes;
   const myTasteFoods = dedupeFoods(myWants.map((foodId) => foodMap[foodId]).filter(isFood)).filter(matchesActiveFilters);
   const partnerTasteFoods = dedupeFoods(theirWants.map((foodId) => foodMap[foodId]).filter(isFood)).filter(matchesActiveFilters);
-  const hasActiveFilters = mealTypeFilter !== "all" || mealKindFilter !== "all";
+  const hasActiveFilters = foodTypeFilter !== "all" || dishKindFilter !== "all";
   const filterSummary = [
-    mealTypeFilter !== "all" ? optionLabel(filterOptions.mealTypes, mealTypeFilter) : "",
-    mealKindFilter !== "all" ? optionLabel(filterOptions.mealKinds, mealKindFilter) : "",
+    foodTypeFilter !== "all" ? optionLabel(filterOptions.foodTypes, foodTypeFilter) : "",
+    dishKindFilter !== "all" ? optionLabel(filterOptions.dishKinds, dishKindFilter) : "",
   ].filter(Boolean);
   const filterSummaryText = filterSummary.length > 0 ? filterSummary.join(" · ") : "Усі";
   const topCardText = topCard ? getFoodText(topCard, translatedFoods[topCard.id]) : null;
@@ -836,7 +838,7 @@ export default function RoomPage() {
     <main className="mx-auto flex min-h-[100svh] w-full max-w-md flex-col gap-3 bg-[#fff5f6] px-3 py-3 pb-[calc(6.25rem+env(safe-area-inset-bottom))] text-[#351316] sm:px-4">
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#e11d48] shadow-[0_4px_0_#9f1239]">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#e11d48] shadow-[0_3px_0_#f8cbd2]">
             <Cherry className="h-5 w-5 text-white" />
           </div>
           <div className="min-w-0">
@@ -854,7 +856,7 @@ export default function RoomPage() {
               void loadSavedRoomDetails(rooms);
               setRoomsOpen(true);
             }}
-            className="h-11 w-11 rounded-full border-2 border-[#ffd1d8] bg-white p-0 text-[#be123c] shadow-[0_4px_0_#ffd1d8]"
+            className="h-11 w-11 rounded-full border-2 border-[#ffd1d8] bg-white p-0 text-[#be123c] shadow-[0_3px_0_#ffe9ed]"
             aria-label="Керувати кімнатами"
           >
             <Users className="h-5 w-5" />
@@ -862,17 +864,8 @@ export default function RoomPage() {
           <Button
             type="button"
             variant="outline"
-            onClick={copyLink}
-            className="h-11 w-11 rounded-full border-2 border-[#ffd1d8] bg-white p-0 text-[#be123c] shadow-[0_4px_0_#ffd1d8]"
-            aria-label={copiedLink ? "Посилання скопійовано" : "Скопіювати посилання"}
-          >
-            {copiedLink ? <Check className="h-5 w-5" /> : <Link2 className="h-5 w-5" />}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
             onClick={() => setFiltersOpen(true)}
-            className="relative h-11 w-11 rounded-full border-2 border-[#ffd1d8] bg-white p-0 text-[#be123c] shadow-[0_4px_0_#ffd1d8]"
+            className="relative h-11 w-11 rounded-full border-2 border-[#ffd1d8] bg-white p-0 text-[#be123c] shadow-[0_3px_0_#ffe9ed]"
             aria-label="Відкрити фільтри"
           >
             <SlidersHorizontal className="h-5 w-5" />
@@ -880,7 +873,6 @@ export default function RoomPage() {
           </Button>
         </div>
       </div>
-      <RoomRosterCard room={room} activeName={name || joinName} />
       {needsLocalSession ? (
         <Card className="card-duo">
           <CardHeader>
@@ -894,7 +886,7 @@ export default function RoomPage() {
       ) : needsJoin ? (
         <Card className="card-duo overflow-hidden">
           <CardHeader className="items-center text-center">
-            <div className="mb-1 flex h-16 w-16 items-center justify-center rounded-[1.35rem] bg-[#e11d48] text-white shadow-[0_8px_0_#9f1239]">
+            <div className="mb-1 flex h-16 w-16 items-center justify-center rounded-[1.35rem] bg-[#e11d48] text-white shadow-[0_4px_0_#f8cbd2]">
               <Cherry className="h-8 w-8" />
             </div>
             <CardTitle className="text-2xl font-black">FoodMatch інвайт</CardTitle>
@@ -917,26 +909,11 @@ export default function RoomPage() {
         </Card>
       ) : (
         <Tabs defaultValue="swipe" className="w-full">
-          {room.user_2_name === null ? (
-            <Card className="card-duo">
-              <CardContent className="flex items-center gap-3 p-4">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#fff1f3] text-[#be123c]">
-                  <Link2 className="h-5 w-5" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-black text-[#351316]">Інвайт готовий</p>
-                  <p className="text-xs font-bold leading-5 text-[#7a3a43]">
-                    Надішли посилання своїй людині. Коли вона приєднається, ваші свайпи перетворяться на метчі.
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          ) : null}
           <TabsContent value="swipe" className="space-y-4">
             <button
               type="button"
               onClick={() => setFiltersOpen(true)}
-              className="flex w-full items-center justify-between rounded-[1.35rem] border-2 border-[#ffd1d8] bg-white px-4 py-2.5 text-left shadow-[0_4px_0_#ffd1d8]"
+              className="flex w-full items-center justify-between rounded-[1.35rem] border-2 border-[#ffd1d8] bg-white px-4 py-2.5 text-left shadow-[0_3px_0_#ffe9ed]"
             >
               <span className="flex min-w-0 items-center gap-2 text-sm font-black text-[#351316]">
                 <SlidersHorizontal className="h-4 w-4 shrink-0 text-[#e11d48]" />
@@ -967,7 +944,7 @@ export default function RoomPage() {
                       setSelectedFood(topCard);
                     }
                   }}
-                  className="relative flex h-[clamp(390px,calc(100svh-232px),620px)] cursor-pointer flex-col overflow-hidden rounded-[1.8rem] border-2 border-[#ffd1d8] bg-white shadow-[0_8px_0_#ffd1d8]"
+                  className="relative flex h-[clamp(430px,calc(100svh-150px),680px)] cursor-pointer flex-col overflow-hidden rounded-[1.8rem] border-2 border-[#ffd1d8] bg-white shadow-[0_4px_0_#ffe9ed]"
                 >
                   {(topCard.name || topCard.ingredients || topCard.instructions) ? (
                     <Button
@@ -978,7 +955,7 @@ export default function RoomPage() {
                         event.stopPropagation();
                         void translateFood(topCard);
                       }}
-                      className="absolute right-3 top-3 z-10 h-11 w-11 rounded-full border-2 border-white/80 bg-white/95 p-0 text-[#be123c] shadow-[0_6px_18px_rgba(53,19,22,0.18)]"
+                      className="absolute right-3 top-3 z-10 h-11 w-11 rounded-full border-2 border-white/80 bg-white/95 p-0 text-[#be123c] shadow-[0_4px_14px_rgba(154,25,42,0.10)]"
                       aria-label="Перекласти картку"
                     >
                       {translatingFoodId === topCard.id ? <Loader2 className="h-5 w-5 animate-spin" /> : <Languages className="h-5 w-5" />}
@@ -1004,7 +981,7 @@ export default function RoomPage() {
                           event.stopPropagation();
                           void swipe(topCard, "dislike");
                         }}
-                        className="btn-duo-danger h-16 w-16 rounded-full p-0 text-2xl shadow-[0_8px_20px_rgba(255,75,75,0.22)] disabled:bg-[#b7b7b7] disabled:border-[#929292]"
+                        className="btn-duo-danger h-16 w-16 rounded-full p-0 text-2xl shadow-[0_5px_16px_rgba(255,75,75,0.12)] disabled:bg-[#b7b7b7] disabled:border-[#929292]"
                         aria-label="Не хочу"
                       >
                         <ThumbsDown className="h-7 w-7" />
@@ -1017,7 +994,7 @@ export default function RoomPage() {
                           event.stopPropagation();
                           void undoLastSwipe();
                         }}
-                        className="h-12 w-12 rounded-full border-2 border-[#ffd1d8] bg-white p-0 text-[#7a3a43] shadow-[0_5px_0_#ffd1d8] disabled:opacity-40"
+                        className="h-12 w-12 rounded-full border-2 border-[#ffd1d8] bg-white p-0 text-[#7a3a43] shadow-[0_3px_0_#ffe9ed] disabled:opacity-40"
                         aria-label="Назад"
                       >
                         <RotateCcw className="h-5 w-5" />
@@ -1028,7 +1005,7 @@ export default function RoomPage() {
                           event.stopPropagation();
                           void swipe(topCard, "like");
                         }}
-                        className="btn-duo-primary h-16 w-16 rounded-full p-0 text-2xl shadow-[0_8px_20px_rgba(225,29,72,0.22)] disabled:bg-[#b7b7b7] disabled:border-[#929292]"
+                        className="btn-duo-primary h-16 w-16 rounded-full p-0 text-2xl shadow-[0_5px_16px_rgba(225,29,72,0.12)] disabled:bg-[#b7b7b7] disabled:border-[#929292]"
                         aria-label="Хочу"
                       >
                         <ThumbsUp className="h-7 w-7" />
@@ -1038,7 +1015,7 @@ export default function RoomPage() {
                 </motion.div>
               </AnimatePresence>
             ) : (
-              <Card className="rounded-[2rem] border-2 border-dashed border-[#badea8] bg-white shadow-[0_8px_0_#ffd1d8]">
+              <Card className="rounded-[2rem] border-2 border-dashed border-[#badea8] bg-white shadow-[0_4px_0_#edf8e6]">
                 <CardContent className="space-y-3 py-10 text-center">
                   <p className="text-2xl font-black text-[#351316]">Картки закінчились</p>
                   <p className="text-sm font-bold text-[#6b7280]">
@@ -1057,7 +1034,7 @@ export default function RoomPage() {
             <button
               type="button"
               onClick={() => setFiltersOpen(true)}
-              className="flex w-full items-center justify-between rounded-[1.6rem] border-2 border-[#ffd1d8] bg-white px-4 py-3 text-left shadow-[0_4px_0_#ffd1d8]"
+              className="flex w-full items-center justify-between rounded-[1.6rem] border-2 border-[#ffd1d8] bg-white px-4 py-3 text-left shadow-[0_3px_0_#ffe9ed]"
             >
               <span className="flex min-w-0 items-center gap-2 text-sm font-black text-[#351316]">
                 <SlidersHorizontal className="h-4 w-4 shrink-0 text-[#e11d48]" />
@@ -1146,7 +1123,7 @@ export default function RoomPage() {
             </Card>
           </TabsContent>
 
-          <TabsList className="fixed inset-x-3 bottom-[calc(0.75rem+env(safe-area-inset-bottom))] z-30 mx-auto grid !h-[72px] w-[calc(100%-1.5rem)] max-w-md grid-cols-2 overflow-hidden rounded-[1.6rem] border-2 border-[#ffd1d8] bg-white/95 p-1.5 shadow-[0_8px_0_#ffd1d8] backdrop-blur">
+          <TabsList className="fixed inset-x-3 bottom-[calc(0.75rem+env(safe-area-inset-bottom))] z-30 mx-auto grid !h-[72px] w-[calc(100%-1.5rem)] max-w-md grid-cols-2 overflow-hidden rounded-[1.6rem] border-2 border-[#ffd1d8] bg-white/95 p-1.5 shadow-[0_4px_0_#ffe9ed] backdrop-blur">
             <TabsTrigger value="swipe" className="!h-full min-w-0 rounded-[1.25rem] text-base font-black data-active:bg-[#e11d48] data-active:text-white data-active:shadow-none">
               <GalleryHorizontalEnd className="h-5 w-5" />
               Свайпи
@@ -1160,7 +1137,7 @@ export default function RoomPage() {
       )}
 
       {copiedLink ? (
-        <div className="fixed left-1/2 top-[calc(0.75rem+env(safe-area-inset-top))] z-[70] flex -translate-x-1/2 items-center gap-2 rounded-full border-2 border-[#ffd1d8] bg-white px-4 py-2 text-sm font-black text-[#be123c] shadow-[0_8px_0_#ffd1d8]">
+        <div className="fixed left-1/2 top-[calc(0.75rem+env(safe-area-inset-top))] z-[70] flex -translate-x-1/2 items-center gap-2 rounded-full border-2 border-[#ffd1d8] bg-white px-4 py-2 text-sm font-black text-[#be123c] shadow-[0_4px_0_#ffe9ed]">
           <Check className="h-4 w-4" />
           Посилання скопійовано
         </div>
@@ -1173,7 +1150,7 @@ export default function RoomPage() {
             initial={{ opacity: 0, y: -18, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -18, scale: 0.98 }}
-            className="fixed left-3 right-3 top-[calc(0.75rem+env(safe-area-inset-top))] z-[65] mx-auto max-w-md overflow-hidden rounded-[1.35rem] border-2 border-[#fecdd3] bg-white shadow-[0_10px_30px_rgba(154,25,42,0.18)]"
+            className="fixed left-3 right-3 top-[calc(0.75rem+env(safe-area-inset-top))] z-[65] mx-auto max-w-md overflow-hidden rounded-[1.35rem] border-2 border-[#fecdd3] bg-white shadow-[0_8px_24px_rgba(154,25,42,0.10)]"
           >
             <div className="flex items-center gap-3 px-3 py-2.5">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#e11d48] text-white">
@@ -1197,7 +1174,7 @@ export default function RoomPage() {
       <Dialog open={roomsOpen} onOpenChange={setRoomsOpen}>
         <DialogContent
           showCloseButton={false}
-          className="bottom-0 left-0 top-auto z-50 max-h-[86vh] w-full max-w-none translate-x-0 translate-y-0 gap-5 rounded-b-none rounded-t-[2rem] border-2 border-[#ffd1d8] bg-white p-5 shadow-[0_-16px_60px_rgba(154,25,42,0.18)] sm:left-1/2 sm:max-w-lg sm:-translate-x-1/2 sm:rounded-b-[2rem]"
+          className="bottom-0 left-0 top-auto z-50 max-h-[86vh] w-full max-w-none translate-x-0 translate-y-0 gap-5 rounded-b-none rounded-t-[2rem] border-2 border-[#ffd1d8] bg-white p-5 shadow-[0_-10px_36px_rgba(154,25,42,0.10)] sm:left-1/2 sm:max-w-lg sm:-translate-x-1/2 sm:rounded-b-[2rem]"
         >
           <DialogHeader>
             <div className="mx-auto h-1.5 w-12 rounded-full bg-[#ffd1d8]" />
@@ -1216,6 +1193,34 @@ export default function RoomPage() {
           </DialogHeader>
 
           <div className="space-y-3 overflow-y-auto">
+            <RoomRosterCard room={room} activeName={name || joinName} />
+            {room.user_2_name === null ? (
+              <div className="rounded-3xl border-2 border-[#ffd1d8] bg-[#fff8f9] p-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white text-[#be123c]">
+                    <Link2 className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0 space-y-3">
+                    <div>
+                      <p className="text-sm font-black text-[#351316]">Інвайт готовий</p>
+                      <p className="text-xs font-bold leading-5 text-[#7a3a43]">
+                        Надішли посилання своїй людині. Коли вона приєднається, ваші свайпи перетворяться на метчі.
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={copyLink}
+                      className="h-11 rounded-2xl border-2 border-[#ffd1d8] bg-white px-4 font-black text-[#be123c]"
+                    >
+                      {copiedLink ? <Check className="h-5 w-5" /> : <Link2 className="h-5 w-5" />}
+                      {copiedLink ? "Скопійовано" : "Скопіювати інвайт"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
             {savedRooms.length > 0 ? (
               savedRooms.map((savedRoom) => {
                 const savedRoomDetail = savedRoomDetails[savedRoom.id];
@@ -1275,7 +1280,7 @@ export default function RoomPage() {
       <Dialog open={filtersOpen} onOpenChange={setFiltersOpen}>
         <DialogContent
           showCloseButton={false}
-          className="bottom-0 left-0 top-auto z-50 max-h-[86vh] w-full max-w-none translate-x-0 translate-y-0 gap-5 rounded-b-none rounded-t-[2rem] border-2 border-[#ffd1d8] bg-white p-5 shadow-[0_-16px_60px_rgba(154,25,42,0.18)] sm:left-1/2 sm:max-w-lg sm:-translate-x-1/2 sm:rounded-b-[2rem]"
+          className="bottom-0 left-0 top-auto z-50 max-h-[86vh] w-full max-w-none translate-x-0 translate-y-0 gap-5 rounded-b-none rounded-t-[2rem] border-2 border-[#ffd1d8] bg-white p-5 shadow-[0_-10px_36px_rgba(154,25,42,0.10)] sm:left-1/2 sm:max-w-lg sm:-translate-x-1/2 sm:rounded-b-[2rem]"
         >
           <DialogHeader>
             <div className="mx-auto h-1.5 w-12 rounded-full bg-[#ffd1d8]" />
@@ -1295,21 +1300,22 @@ export default function RoomPage() {
 
           <div className="space-y-5 overflow-y-auto pb-1">
             <section className="space-y-2">
-              <p className="text-xs font-black uppercase tracking-[0.14em] text-[#9f5660]">Коли їмо</p>
-              <div className="grid grid-cols-2 gap-2">
-                {filterOptions.mealTypes.map((option) => (
+              <p className="text-xs font-black uppercase tracking-[0.14em] text-[#9f5660]">Що показувати</p>
+              <div className="grid grid-cols-3 gap-2">
+                {filterOptions.foodTypes.map((option) => (
                   <Button
                     key={option.value}
                     type="button"
                     variant="ghost"
-                    onClick={() => setMealTypeFilter(option.value)}
+                    onClick={() => setFoodTypeFilter(option.value)}
                     className={`h-11 rounded-2xl border-2 px-2 text-sm font-black ${
-                      mealTypeFilter === option.value
+                      foodTypeFilter === option.value
                         ? "border-[#9f1239] bg-[#e11d48] text-white"
                         : "border-[#ffe4e8] bg-[#fff7f8] text-[#7a3a43]"
                     }`}
                   >
                     {option.label}
+                    {option.count ? <span className="ml-1 opacity-70">{option.count}</span> : null}
                   </Button>
                 ))}
               </div>
@@ -1318,14 +1324,14 @@ export default function RoomPage() {
             <section className="space-y-2">
               <p className="text-xs font-black uppercase tracking-[0.14em] text-[#9f5660]">Тип страви</p>
               <div className="grid grid-cols-2 gap-2">
-                {filterOptions.mealKinds.map((option) => (
+                {filterOptions.dishKinds.map((option) => (
                   <Button
                     key={option.value}
                     type="button"
                     variant="ghost"
-                    onClick={() => setMealKindFilter(option.value)}
+                    onClick={() => setDishKindFilter(option.value)}
                     className={`h-11 rounded-2xl border-2 px-2 text-sm font-black ${
-                      mealKindFilter === option.value
+                      dishKindFilter === option.value
                         ? "border-[#9f1239] bg-[#e11d48] text-white"
                         : "border-[#ffe4e8] bg-[#fff7f8] text-[#7a3a43]"
                     }`}
@@ -1353,7 +1359,7 @@ export default function RoomPage() {
       <Dialog open={Boolean(selectedFood)} onOpenChange={(open) => !open && setSelectedFood(null)}>
         <DialogContent
           showCloseButton={false}
-          className="bottom-0 left-0 top-auto max-h-[calc(100svh-1rem)] w-full max-w-none translate-x-0 translate-y-0 overflow-y-auto rounded-b-none rounded-t-[2rem] border-2 border-[#ffd1d8] bg-white p-0 shadow-[0_-16px_60px_rgba(154,25,42,0.18)] sm:left-1/2 sm:max-w-md sm:-translate-x-1/2 sm:rounded-b-[2rem]"
+          className="bottom-0 left-0 top-auto max-h-[calc(100svh-1rem)] w-full max-w-none translate-x-0 translate-y-0 overflow-y-auto rounded-b-none rounded-t-[2rem] border-2 border-[#ffd1d8] bg-white p-0 shadow-[0_-10px_36px_rgba(154,25,42,0.10)] sm:left-1/2 sm:max-w-md sm:-translate-x-1/2 sm:rounded-b-[2rem]"
         >
           <div className="relative">
             <div className="absolute left-1/2 top-3 z-10 h-1.5 w-12 -translate-x-1/2 rounded-full bg-white/80 shadow-sm" />
@@ -1361,7 +1367,7 @@ export default function RoomPage() {
               type="button"
               variant="ghost"
               onClick={() => setSelectedFood(null)}
-              className="absolute right-3 top-3 z-10 h-10 w-10 rounded-full bg-white/90 p-0 text-[#351316] shadow-[0_4px_16px_rgba(0,0,0,0.18)]"
+              className="absolute right-3 top-3 z-10 h-10 w-10 rounded-full bg-white/90 p-0 text-[#351316] shadow-[0_4px_14px_rgba(53,19,22,0.10)]"
               aria-label="Закрити"
             >
               <X className="h-5 w-5" />
@@ -1455,7 +1461,7 @@ export default function RoomPage() {
               </motion.span>
             ))}
             <div className="relative z-10 mx-auto mb-5 flex w-40 items-center justify-center">
-              <div className="h-28 w-28 overflow-hidden rounded-full border-4 border-white bg-white shadow-[0_12px_34px_rgba(154,25,42,0.24)]">
+              <div className="h-28 w-28 overflow-hidden rounded-full border-4 border-white bg-white shadow-[0_8px_24px_rgba(154,25,42,0.12)]">
                 {matchFood?.image_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={matchFood.image_url} alt={matchFoodText?.name ?? ""} className="h-full w-full object-cover" />
@@ -1464,7 +1470,7 @@ export default function RoomPage() {
                 )}
               </div>
               <div className="h-1 w-9 rounded-full bg-[#e11d48]" />
-              <div className="flex h-14 w-14 items-center justify-center rounded-full border-4 border-white bg-[#e11d48] text-white shadow-[0_10px_24px_rgba(154,25,42,0.24)]">
+              <div className="flex h-14 w-14 items-center justify-center rounded-full border-4 border-white bg-[#e11d48] text-white shadow-[0_7px_18px_rgba(154,25,42,0.12)]">
                 <Heart className="h-7 w-7 fill-white" />
               </div>
             </div>

@@ -143,7 +143,7 @@
   }
 
   .card-duo {
-    @apply rounded-3xl border-2 border-[#ffd1d8] bg-white shadow-[0_4px_0_0_#ffd1d8];
+    @apply rounded-3xl border-2 border-[#ffd1d8] bg-white shadow-[0_3px_0_0_#ffe9ed];
   }
 
   .no-scrollbar {

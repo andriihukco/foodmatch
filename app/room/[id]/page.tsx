@@ -482,73 +482,110 @@ export default function RoomPage() {
 
   const loadFoods = useCallback(async (mode: "replace" | "append" = "replace") => {
     if (!name || !room || !supabase) return;
+    const supabaseClient = supabase;
     setLoadingFoods(true);
     const swipedIds = [...swipedIdsRef.current];
 
     const selectedFoodType = foodTypeFilterOptions.find((option) => option.value === foodTypeFilter);
     const selectedDishKinds = dishKindFilterOptions.filter((option) => dishKindFilters.includes(option.value));
-    const pageSize = selectedDishKinds.length > 1 ? 120 : 36;
+    const targetSize = 36;
+    const pageSize = selectedDishKinds.length > 1 ? 120 : targetSize;
+    const mealTypes = [...new Set(selectedDishKinds.flatMap((option) => option.mealTypes ?? []))];
+    const tagsAny = [...new Set(selectedDishKinds.flatMap((option) => option.tagsAny ?? []))];
+    const orFilters = [
+      mealTypes.length > 0 ? `meal_type.in.(${mealTypes.join(",")})` : "",
+      tagsAny.length > 0 ? `tags.ov.{${tagsAny.join(",")}}` : "",
+    ].filter(Boolean);
 
-    let countQuery = supabase.from("foods").select("id", { count: "exact", head: true }).in("source", visibleFoodSources);
-    let query = supabase.from("foods").select("*").in("source", visibleFoodSources);
+    const buildFoodQueries = (imageMode: "with-image" | "without-image") => {
+      let countQuery = supabaseClient.from("foods").select("id", { count: "exact", head: true }).in("source", visibleFoodSources);
+      let query = supabaseClient.from("foods").select("*").in("source", visibleFoodSources);
 
-    if (selectedFoodType?.foodTypes) {
-      countQuery = countQuery.in("food_type", selectedFoodType.foodTypes);
-      query = query.in("food_type", selectedFoodType.foodTypes);
-    }
-    if (selectedDishKinds.length === 1) {
-      const [selectedDishKind] = selectedDishKinds;
-      if (selectedDishKind.foodTypes) {
-        countQuery = countQuery.in("food_type", selectedDishKind.foodTypes);
-        query = query.in("food_type", selectedDishKind.foodTypes);
+      if (imageMode === "with-image") {
+        countQuery = countQuery.not("image_url", "is", null);
+        query = query.not("image_url", "is", null);
+      } else {
+        countQuery = countQuery.is("image_url", null);
+        query = query.is("image_url", null);
       }
-      if (selectedDishKind.mealTypes && !selectedDishKind.tagsAny) {
-        countQuery = countQuery.in("meal_type", selectedDishKind.mealTypes);
-        query = query.in("meal_type", selectedDishKind.mealTypes);
-      }
-      if (selectedDishKind.tagsAny) {
-        countQuery = countQuery.overlaps("tags", selectedDishKind.tagsAny);
-        query = query.overlaps("tags", selectedDishKind.tagsAny);
-      }
-    } else if (selectedDishKinds.length > 1) {
-      const mealTypes = [...new Set(selectedDishKinds.flatMap((option) => option.mealTypes ?? []))];
-      const tagsAny = [...new Set(selectedDishKinds.flatMap((option) => option.tagsAny ?? []))];
-      const orFilters = [
-        mealTypes.length > 0 ? `meal_type.in.(${mealTypes.join(",")})` : "",
-        tagsAny.length > 0 ? `tags.ov.{${tagsAny.join(",")}}` : "",
-      ].filter(Boolean);
 
-      if (orFilters.length > 0) {
+      if (selectedFoodType?.foodTypes) {
+        countQuery = countQuery.in("food_type", selectedFoodType.foodTypes);
+        query = query.in("food_type", selectedFoodType.foodTypes);
+      }
+      if (selectedDishKinds.length === 1) {
+        const [selectedDishKind] = selectedDishKinds;
+        if (selectedDishKind.foodTypes) {
+          countQuery = countQuery.in("food_type", selectedDishKind.foodTypes);
+          query = query.in("food_type", selectedDishKind.foodTypes);
+        }
+        if (selectedDishKind.mealTypes && !selectedDishKind.tagsAny) {
+          countQuery = countQuery.in("meal_type", selectedDishKind.mealTypes);
+          query = query.in("meal_type", selectedDishKind.mealTypes);
+        }
+        if (selectedDishKind.tagsAny) {
+          countQuery = countQuery.overlaps("tags", selectedDishKind.tagsAny);
+          query = query.overlaps("tags", selectedDishKind.tagsAny);
+        }
+      } else if (orFilters.length > 0) {
         countQuery = countQuery.or(orFilters.join(","));
         query = query.or(orFilters.join(","));
       }
-    }
 
-    if (swipedIds.length > 0) {
-      countQuery = countQuery.not("id", "in", `(${swipedIds.join(",")})`);
-      query = query.not("id", "in", `(${swipedIds.join(",")})`);
-    }
+      if (swipedIds.length > 0) {
+        countQuery = countQuery.not("id", "in", `(${swipedIds.join(",")})`);
+        query = query.not("id", "in", `(${swipedIds.join(",")})`);
+      }
 
-    const { count, error: countError } = await countQuery;
-    if (countError) {
+      return { countQuery, query };
+    };
+
+    const loadRandomFoods = async (imageMode: "with-image" | "without-image", desiredCount: number) => {
+      if (desiredCount <= 0) return { foods: [] as Food[], errorMessage: "" };
+      const { countQuery, query } = buildFoodQueries(imageMode);
+      const { count, error: countError } = await countQuery;
+
+      if (countError) {
+        return { foods: [] as Food[], errorMessage: formatSupabaseError("Не вдалося порахувати картки їжі", countError) };
+      }
+
+      const availableCount = count ?? 0;
+      if (availableCount === 0) return { foods: [] as Food[], errorMessage: "" };
+
+      const fetchSize = Math.min(Math.max(desiredCount, pageSize), availableCount);
+      const maxOffset = Math.max(availableCount - fetchSize, 0);
+      const randomOffset = maxOffset > 0 ? Math.floor(Math.random() * (maxOffset + 1)) : 0;
+      const { data, error: foodsError } = await query.range(randomOffset, randomOffset + fetchSize - 1);
+
+      if (foodsError || !data) {
+        return {
+          foods: [] as Food[],
+          errorMessage: foodsError ? formatSupabaseError("Не вдалося завантажити картки їжі", foodsError) : "Не вдалося завантажити картки їжі.",
+        };
+      }
+
+      return {
+        foods: shuffleFoods(dedupeFoods((data as Food[]).filter((food) => matchesAnyOption(food, selectedDishKinds)))).slice(0, desiredCount),
+        errorMessage: "",
+      };
+    };
+
+    const imageFoods = await loadRandomFoods("with-image", targetSize);
+    if (imageFoods.errorMessage) {
       setLoadingFoods(false);
-      setError(formatSupabaseError("Не вдалося порахувати картки їжі", countError));
+      setError(imageFoods.errorMessage);
       return;
     }
 
-    const availableCount = count ?? 0;
-    const maxOffset = Math.max(availableCount - pageSize, 0);
-    const randomOffset = maxOffset > 0 ? Math.floor(Math.random() * (maxOffset + 1)) : 0;
-
-    const { data, error: foodsError } = await query.range(randomOffset, randomOffset + pageSize - 1);
+    const placeholderFoods = await loadRandomFoods("without-image", targetSize - imageFoods.foods.length);
     setLoadingFoods(false);
 
-    if (foodsError || !data) {
-      setError(foodsError ? formatSupabaseError("Не вдалося завантажити картки їжі", foodsError) : "Не вдалося завантажити картки їжі.");
+    if (placeholderFoods.errorMessage) {
+      setError(placeholderFoods.errorMessage);
       return;
     }
 
-    const incomingFoods = shuffleFoods(dedupeFoods((data as Food[]).filter((food) => matchesAnyOption(food, selectedDishKinds)))).slice(0, 36);
+    const incomingFoods = dedupeFoods([...imageFoods.foods, ...placeholderFoods.foods]).slice(0, targetSize);
     setFoods((prev) => {
       if (mode === "replace") return incomingFoods;
       return dedupeFoods([...prev, ...incomingFoods]);

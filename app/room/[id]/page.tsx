@@ -1347,7 +1347,7 @@ export default function RoomPage() {
       <Dialog open={filtersOpen} onOpenChange={setFiltersOpen}>
         <DialogContent
           showCloseButton={false}
-          className="bottom-0 left-0 top-auto z-50 max-h-[86vh] w-full max-w-none translate-x-0 translate-y-0 gap-5 rounded-b-none rounded-t-[2rem] border-2 border-[#ffd1d8] bg-white p-5 shadow-[0_-10px_36px_rgba(154,25,42,0.10)] sm:left-1/2 sm:max-w-lg sm:-translate-x-1/2 sm:rounded-b-[2rem]"
+          className="bottom-0 left-0 top-auto z-50 grid max-h-[calc(100svh-1rem)] w-full max-w-none translate-x-0 translate-y-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-5 rounded-b-none rounded-t-[2rem] border-2 border-[#ffd1d8] bg-white p-5 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-[0_-10px_36px_rgba(154,25,42,0.10)] sm:left-1/2 sm:max-w-lg sm:-translate-x-1/2 sm:rounded-b-[2rem]"
         >
           <DialogHeader>
             <div className="mx-auto h-1.5 w-12 rounded-full bg-[#ffd1d8]" />
@@ -1365,7 +1365,7 @@ export default function RoomPage() {
             </div>
           </DialogHeader>
 
-          <div className="space-y-5 overflow-y-auto pb-1">
+          <div className="min-h-0 space-y-5 overflow-y-auto pb-1 no-scrollbar">
             <section className="space-y-2">
               <p className="text-xs font-black uppercase tracking-[0.14em] text-[#9f5660]">Що показувати</p>
               <div className="grid grid-cols-3 gap-2">
@@ -1416,7 +1416,7 @@ export default function RoomPage() {
             <Button type="button" variant="outline" onClick={clearFilters} className="h-12 rounded-2xl border-2 font-black">
               Скинути
             </Button>
-            <Button type="button" onClick={() => setFiltersOpen(false)} className="btn-duo-primary h-12 rounded-2xl text-base">
+            <Button type="button" onClick={() => setFiltersOpen(false)} className="btn-duo-primary h-12 rounded-2xl text-base font-black">
               Готово
             </Button>
           </div>

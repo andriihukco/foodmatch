@@ -127,6 +127,12 @@
   html {
     font-family: var(--font-nunito), sans-serif;
   }
+
+  .lucide {
+    width: 1.5rem !important;
+    height: 1.5rem !important;
+    stroke-width: 2 !important;
+  }
 }
 
 @layer components {

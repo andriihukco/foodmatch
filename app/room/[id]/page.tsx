@@ -223,8 +223,7 @@ export default function RoomPage() {
 
   const roomStatus = useMemo(() => {
     if (!room || !name) return "Шлях до серця лежить через шлунок";
-    if (room.user_2_name === null) return "Запроси свою людину";
-    return `Ти: ${name}`;
+    return roomMemberLine(room, name);
   }, [name, room]);
 
   const refreshRoom = useCallback(async () => {
@@ -1381,8 +1380,14 @@ export default function RoomPage() {
                         : "border-[#ffe4e8] bg-[#fff7f8] text-[#7a3a43]"
                     }`}
                   >
-                    <span className="max-w-full truncate">{option.label}</span>
-                    <span className="min-h-3 opacity-70">{option.count ?? ""}</span>
+                    {option.count ? (
+                      <>
+                        <span className="max-w-full truncate">{option.label}</span>
+                        <span className="opacity-70">{option.count}</span>
+                      </>
+                    ) : (
+                      <span className="max-w-full truncate">{option.label}</span>
+                    )}
                   </Button>
                 ))}
               </div>
@@ -1403,8 +1408,14 @@ export default function RoomPage() {
                         : "border-[#ffe4e8] bg-[#fff7f8] text-[#7a3a43]"
                     }`}
                   >
-                    <span className="max-w-full truncate">{option.label}</span>
-                    <span className="min-h-3 opacity-70">{option.count ?? ""}</span>
+                    {option.count ? (
+                      <>
+                        <span className="max-w-full truncate">{option.label}</span>
+                        <span className="opacity-70">{option.count}</span>
+                      </>
+                    ) : (
+                      <span className="max-w-full truncate">{option.label}</span>
+                    )}
                   </Button>
                 ))}
               </div>

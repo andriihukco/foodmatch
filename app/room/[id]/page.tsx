@@ -23,6 +23,7 @@ import type { Food, Room, SwipeAction } from "@/lib/types";
 type FoodMap = Record<string, Food>;
 type RoomMap = Record<string, Room>;
 type FilterValue = string;
+type FilterValues = string[];
 type SwipeDirection = SwipeAction | null;
 type LastSwipe = { food: Food; action: SwipeAction } | null;
 type MainTab = "swipe" | "results";
@@ -71,7 +72,7 @@ const initialFilterOptions: FoodFilterOptions = {
   dishKinds: dishKindFilterOptions,
 };
 
-const visibleFoodSources = ["themealdb-ingredient-list", "themealdb-meal-list"];
+const visibleFoodSources = ["themealdb-ingredient-list", "themealdb-meal-list", "josephrmartinez/recipe-dataset"];
 
 function roomUiStorageKey(roomId: string) {
   return `foodmatch:room:${roomId}:ui`;
@@ -144,6 +145,38 @@ function matchesOption(food: FilterableFood, option: FilterOption | undefined) {
   return !option.mealTypes && !option.tagsAny;
 }
 
+function matchesAnyOption(food: FilterableFood, options: FilterOption[]) {
+  if (options.length === 0) return true;
+  return options.some((option) => matchesOption(food, option));
+}
+
+function FoodImage({
+  src,
+  alt,
+  className,
+  placeholderClassName,
+  iconClassName = "text-5xl",
+}: {
+  src: string | null | undefined;
+  alt: string;
+  className: string;
+  placeholderClassName: string;
+  iconClassName?: string;
+}) {
+  const [failed, setFailed] = useState(false);
+
+  if (!src || failed) {
+    return (
+      <div className={placeholderClassName}>
+        <span className={iconClassName}>🍽️</span>
+      </div>
+    );
+  }
+
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={src} alt={alt} className={className} onError={() => setFailed(true)} />;
+}
+
 function FoodPreviewButton({
   food,
   translatedText,
@@ -161,12 +194,13 @@ function FoodPreviewButton({
       onClick={onClick}
       className="flex w-full items-center gap-3 rounded-2xl border-2 border-[#e5e5e5] bg-white p-2.5 text-left transition hover:border-[#e11d48]"
     >
-      {food.image_url ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={food.image_url} alt={food.name} className="h-14 w-14 shrink-0 rounded-xl object-cover" />
-      ) : (
-        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-[#fff1f3] text-2xl">🍽️</div>
-      )}
+      <FoodImage
+        src={food.image_url}
+        alt={food.name}
+        className="h-14 w-14 shrink-0 rounded-xl object-cover"
+        placeholderClassName="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-[#fff1f3]"
+        iconClassName="text-2xl"
+      />
       <span className="min-w-0">
         <span className="block truncate text-base font-black text-[#351316]">{foodText.name}</span>
         {foodText.ingredients ? (
@@ -193,7 +227,7 @@ export default function RoomPage() {
   const [loadingRoom, setLoadingRoom] = useState(true);
   const [loadingFoods, setLoadingFoods] = useState(false);
   const [foodTypeFilter, setFoodTypeFilter] = useState<FilterValue>("all");
-  const [dishKindFilter, setDishKindFilter] = useState<FilterValue>("all");
+  const [dishKindFilters, setDishKindFilters] = useState<FilterValues>([]);
   const [filterOptions, setFilterOptions] = useState<FoodFilterOptions>(initialFilterOptions);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [foods, setFoods] = useState<Food[]>([]);
@@ -451,9 +485,9 @@ export default function RoomPage() {
     setLoadingFoods(true);
     const swipedIds = [...swipedIdsRef.current];
 
-    const pageSize = 36;
     const selectedFoodType = foodTypeFilterOptions.find((option) => option.value === foodTypeFilter);
-    const selectedDishKind = dishKindFilterOptions.find((option) => option.value === dishKindFilter);
+    const selectedDishKinds = dishKindFilterOptions.filter((option) => dishKindFilters.includes(option.value));
+    const pageSize = selectedDishKinds.length > 1 ? 120 : 36;
 
     let countQuery = supabase.from("foods").select("id", { count: "exact", head: true }).in("source", visibleFoodSources);
     let query = supabase.from("foods").select("*").in("source", visibleFoodSources);
@@ -462,17 +496,32 @@ export default function RoomPage() {
       countQuery = countQuery.in("food_type", selectedFoodType.foodTypes);
       query = query.in("food_type", selectedFoodType.foodTypes);
     }
-    if (selectedDishKind?.foodTypes) {
-      countQuery = countQuery.in("food_type", selectedDishKind.foodTypes);
-      query = query.in("food_type", selectedDishKind.foodTypes);
-    }
-    if (selectedDishKind?.mealTypes && !selectedDishKind.tagsAny) {
-      countQuery = countQuery.in("meal_type", selectedDishKind.mealTypes);
-      query = query.in("meal_type", selectedDishKind.mealTypes);
-    }
-    if (selectedDishKind?.tagsAny) {
-      countQuery = countQuery.overlaps("tags", selectedDishKind.tagsAny);
-      query = query.overlaps("tags", selectedDishKind.tagsAny);
+    if (selectedDishKinds.length === 1) {
+      const [selectedDishKind] = selectedDishKinds;
+      if (selectedDishKind.foodTypes) {
+        countQuery = countQuery.in("food_type", selectedDishKind.foodTypes);
+        query = query.in("food_type", selectedDishKind.foodTypes);
+      }
+      if (selectedDishKind.mealTypes && !selectedDishKind.tagsAny) {
+        countQuery = countQuery.in("meal_type", selectedDishKind.mealTypes);
+        query = query.in("meal_type", selectedDishKind.mealTypes);
+      }
+      if (selectedDishKind.tagsAny) {
+        countQuery = countQuery.overlaps("tags", selectedDishKind.tagsAny);
+        query = query.overlaps("tags", selectedDishKind.tagsAny);
+      }
+    } else if (selectedDishKinds.length > 1) {
+      const mealTypes = [...new Set(selectedDishKinds.flatMap((option) => option.mealTypes ?? []))];
+      const tagsAny = [...new Set(selectedDishKinds.flatMap((option) => option.tagsAny ?? []))];
+      const orFilters = [
+        mealTypes.length > 0 ? `meal_type.in.(${mealTypes.join(",")})` : "",
+        tagsAny.length > 0 ? `tags.ov.{${tagsAny.join(",")}}` : "",
+      ].filter(Boolean);
+
+      if (orFilters.length > 0) {
+        countQuery = countQuery.or(orFilters.join(","));
+        query = query.or(orFilters.join(","));
+      }
     }
 
     if (swipedIds.length > 0) {
@@ -499,13 +548,13 @@ export default function RoomPage() {
       return;
     }
 
-    const incomingFoods = shuffleFoods(dedupeFoods(data as Food[]));
+    const incomingFoods = shuffleFoods(dedupeFoods((data as Food[]).filter((food) => matchesAnyOption(food, selectedDishKinds)))).slice(0, 36);
     setFoods((prev) => {
       if (mode === "replace") return incomingFoods;
       return dedupeFoods([...prev, ...incomingFoods]);
     });
     mergeFoodsIntoMap(incomingFoods);
-  }, [dishKindFilter, foodTypeFilter, mergeFoodsIntoMap, name, room]);
+  }, [dishKindFilters, foodTypeFilter, mergeFoodsIntoMap, name, room]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -530,14 +579,17 @@ export default function RoomPage() {
           const savedState = JSON.parse(rawState) as {
             foodTypeFilter?: unknown;
             dishKindFilter?: unknown;
+            dishKindFilters?: unknown;
             mainTab?: unknown;
             resultView?: unknown;
           };
           if (typeof savedState.foodTypeFilter === "string") {
             setFoodTypeFilter(savedState.foodTypeFilter);
           }
-          if (typeof savedState.dishKindFilter === "string") {
-            setDishKindFilter(savedState.dishKindFilter);
+          if (Array.isArray(savedState.dishKindFilters)) {
+            setDishKindFilters(savedState.dishKindFilters.filter((value): value is string => typeof value === "string" && value !== "all"));
+          } else if (typeof savedState.dishKindFilter === "string" && savedState.dishKindFilter !== "all") {
+            setDishKindFilters([savedState.dishKindFilter]);
           }
           if (typeof savedState.mainTab === "string" && isMainTab(savedState.mainTab)) {
             setMainTab(savedState.mainTab);
@@ -560,11 +612,11 @@ export default function RoomPage() {
     if (!uiHydrated) return;
     window.localStorage.setItem(roomUiStorageKey(roomId), JSON.stringify({
       foodTypeFilter,
-      dishKindFilter,
+      dishKindFilters,
       mainTab,
       resultView,
     }));
-  }, [dishKindFilter, foodTypeFilter, mainTab, resultView, roomId, uiHydrated]);
+  }, [dishKindFilters, foodTypeFilter, mainTab, resultView, roomId, uiHydrated]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -637,7 +689,7 @@ export default function RoomPage() {
 
   const clearFilters = () => {
     setFoodTypeFilter("all");
-    setDishKindFilter("all");
+    setDishKindFilters([]);
   };
 
   const joinRoom = async () => {
@@ -929,10 +981,10 @@ export default function RoomPage() {
   const topCard = foods[0];
   const matches = dedupeFoods(myLikes.filter((foodId) => theirLikes.includes(foodId)).map((foodId) => foodMap[foodId]).filter(isFood));
   const activeFoodTypeOption = filterOptions.foodTypes.find((option) => option.value === foodTypeFilter);
-  const activeDishKindOption = filterOptions.dishKinds.find((option) => option.value === dishKindFilter);
+  const activeDishKindOptions = filterOptions.dishKinds.filter((option) => dishKindFilters.includes(option.value));
   const matchesActiveFilters = (food: Food) => {
     if (!matchesOption(food, activeFoodTypeOption)) return false;
-    if (!matchesOption(food, activeDishKindOption)) return false;
+    if (!matchesAnyOption(food, activeDishKindOptions)) return false;
     return true;
   };
   const filteredMatches = matches.filter(matchesActiveFilters);
@@ -940,10 +992,10 @@ export default function RoomPage() {
   const theirWants = theirLikes;
   const myTasteFoods = dedupeFoods(myWants.map((foodId) => foodMap[foodId]).filter(isFood)).filter(matchesActiveFilters);
   const partnerTasteFoods = dedupeFoods(theirWants.map((foodId) => foodMap[foodId]).filter(isFood)).filter(matchesActiveFilters);
-  const hasActiveFilters = foodTypeFilter !== "all" || dishKindFilter !== "all";
+  const hasActiveFilters = foodTypeFilter !== "all" || dishKindFilters.length > 0;
   const filterSummary = [
     foodTypeFilter !== "all" ? optionLabel(filterOptions.foodTypes, foodTypeFilter) : "",
-    dishKindFilter !== "all" ? optionLabel(filterOptions.dishKinds, dishKindFilter) : "",
+    ...dishKindFilters.map((value) => optionLabel(filterOptions.dishKinds, value)),
   ].filter(Boolean);
   const filterSummaryText = filterSummary.length > 0 ? filterSummary.join(" · ") : "Усі";
   const topCardText = topCard ? getFoodText(topCard, translatedFoods[topCard.id]) : null;
@@ -1102,12 +1154,13 @@ export default function RoomPage() {
                         {translatingFoodId === topCard.id ? <Loader2 className="h-5 w-5 animate-spin" /> : <Languages className="h-5 w-5" />}
                       </Button>
                     ) : null}
-                    {topCard.image_url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={topCard.image_url} alt={topCard.name} className="min-h-0 flex-1 object-cover" />
-                    ) : (
-                      <div className="flex min-h-0 flex-1 items-center justify-center bg-[#fff1f3] text-6xl">🍽️</div>
-                    )}
+                    <FoodImage
+                      src={topCard.image_url}
+                      alt={topCard.name}
+                      className="min-h-0 flex-1 object-cover"
+                      placeholderClassName="flex min-h-0 flex-1 items-center justify-center bg-[#fff1f3]"
+                      iconClassName="text-6xl"
+                    />
                     <div className="shrink-0 space-y-1 p-3.5">
                       <h2 className="line-clamp-2 text-[1.35rem] font-black leading-tight text-[#351316]">{topCardText?.name}</h2>
                       {topCardText?.ingredients ? (
@@ -1519,9 +1572,19 @@ export default function RoomPage() {
                     key={option.value}
                     type="button"
                     variant="ghost"
-                    onClick={() => setDishKindFilter(option.value)}
+                    onClick={() => {
+                      if (option.value === "all") {
+                        setDishKindFilters([]);
+                        return;
+                      }
+                      setDishKindFilters((prev) => (
+                        prev.includes(option.value)
+                          ? prev.filter((value) => value !== option.value)
+                          : [...prev, option.value]
+                      ));
+                    }}
                     className={`flex h-14 flex-col gap-0.5 rounded-2xl border-2 px-1.5 text-center text-xs font-black leading-none !whitespace-normal ${
-                      dishKindFilter === option.value
+                      (option.value === "all" ? dishKindFilters.length === 0 : dishKindFilters.includes(option.value))
                         ? "border-[#9f1239] bg-[#e11d48] text-white"
                         : "border-[#ffe4e8] bg-[#fff7f8] text-[#7a3a43]"
                     }`}
@@ -1568,12 +1631,13 @@ export default function RoomPage() {
             >
               <X className="h-5 w-5" />
             </Button>
-            {selectedFood?.image_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={selectedFood.image_url} alt={selectedFood.name} className="h-56 w-full object-cover" />
-            ) : (
-              <div className="flex h-40 items-center justify-center bg-[#fff1f3] text-6xl">🍽️</div>
-            )}
+            <FoodImage
+              src={selectedFood?.image_url}
+              alt={selectedFood?.name ?? ""}
+              className="h-56 w-full object-cover"
+              placeholderClassName="flex h-40 items-center justify-center bg-[#fff1f3]"
+              iconClassName="text-6xl"
+            />
           </div>
           <div className="space-y-4 p-5">
             <DialogHeader>
@@ -1658,12 +1722,12 @@ export default function RoomPage() {
             ))}
             <div className="relative z-10 mx-auto mb-5 flex items-center justify-center">
               <div className="h-24 w-24 overflow-hidden rounded-full border-4 border-white bg-white shadow-[0_8px_24px_rgba(154,25,42,0.12)]">
-                {matchFood?.image_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={matchFood.image_url} alt={matchFoodText?.name ?? ""} className="h-full w-full object-cover" />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center bg-[#fff7f8] text-5xl">🍽️</div>
-                )}
+                <FoodImage
+                  src={matchFood?.image_url}
+                  alt={matchFoodText?.name ?? ""}
+                  className="h-full w-full object-cover"
+                  placeholderClassName="flex h-full w-full items-center justify-center bg-[#fff7f8]"
+                />
               </div>
               <div className="h-1 w-9 rounded-full bg-[#e11d48]" />
               <div className="flex h-24 w-24 items-center justify-center rounded-full border-4 border-white bg-[#e11d48] text-white shadow-[0_7px_18px_rgba(154,25,42,0.12)]">

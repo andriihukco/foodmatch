@@ -52,7 +52,7 @@ export default function Home() {
     saveLocalRoom({
       id: data.id,
       playerName: trimmedName,
-      label: `${trimmedName}'s room`,
+      label: `Room ${data.id.slice(0, 6).toUpperCase()}`,
     });
     router.push(`/room/${data.id}`);
   };

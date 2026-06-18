@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowRight, Check, Cherry, DoorOpen, GalleryHorizontalEnd, Heart, Languages, Link2, Loader2, Plus, RotateCcw, SlidersHorizontal, Sparkles, ThumbsDown, ThumbsUp, Users, X } from "lucide-react";
+import { ArrowRight, Check, Cherry, DoorOpen, GalleryHorizontalEnd, Heart, Languages, Link2, Loader2, Plus, RotateCcw, SlidersHorizontal, ThumbsDown, ThumbsUp, Users, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,16 +21,17 @@ import { formatSupabaseError, hasSupabaseEnv, supabase } from "@/lib/supabase";
 import type { Food, Room, SwipeAction } from "@/lib/types";
 
 type FoodMap = Record<string, Food>;
+type RoomMap = Record<string, Room>;
 type FilterValue = string;
 type SwipeDirection = SwipeAction | null;
 type LastSwipe = { food: Food; action: SwipeAction } | null;
 type FilterOption = { value: string; label: string; count?: number };
 type FoodFilterOptions = {
-  foodTypes: FilterOption[];
   mealTypes: FilterOption[];
-  tags: FilterOption[];
+  mealKinds: FilterOption[];
 };
 type TranslatedFoodText = {
+  name: string | null;
   ingredients: string | null;
   instructions: string | null;
 };
@@ -40,22 +41,32 @@ type RecentMatch = {
 };
 
 const allFilterOption: FilterOption = { value: "all", label: "Усі" };
-const foodTypeLabels: Record<string, string> = {
-  recipe: "Страви",
-  ingredient: "Інгредієнти",
-  product: "Продукти",
-  fastfood: "Фастфуд",
-};
 const mealTypeLabels: Record<string, string> = {
   breakfast: "Сніданок",
   lunch: "Обід",
   dinner: "Вечеря",
   snack: "Снек",
 };
+const mealKindLabels: Record<string, string> = {
+  beef: "Яловичина",
+  breakfast: "Сніданки",
+  chicken: "Курка",
+  dessert: "Десерти",
+  goat: "Козлятина",
+  lamb: "Баранина",
+  miscellaneous: "Різне",
+  pasta: "Паста",
+  pork: "Свинина",
+  seafood: "Морепродукти",
+  side: "Гарніри",
+  starter: "Закуски",
+  vegan: "Веганське",
+  vegetarian: "Вегетаріанське",
+};
+const mealKindValues = Object.keys(mealKindLabels);
 const initialFilterOptions: FoodFilterOptions = {
-  foodTypes: [allFilterOption],
   mealTypes: [allFilterOption],
-  tags: [allFilterOption],
+  mealKinds: [allFilterOption],
 };
 
 const visibleFoodSources = ["themealdb-ingredient-list", "themealdb-meal-list"];
@@ -101,9 +112,63 @@ function sortedOptions(values: Map<string, number>, labels: Record<string, strin
 
 function getFoodText(food: Food, translatedText: TranslatedFoodText | undefined) {
   return {
+    name: translatedText?.name ?? food.name,
     ingredients: translatedText?.ingredients ?? food.ingredients,
     instructions: translatedText?.instructions ?? food.instructions,
   };
+}
+
+function roomCode(roomId: string) {
+  return roomId.slice(0, 6).toUpperCase();
+}
+
+function roomMemberNames(room: Room | undefined) {
+  if (!room) return [];
+  return [room.user_1_name, room.user_2_name].filter((member): member is string => Boolean(member));
+}
+
+function roomMemberLine(room: Room | undefined, fallbackName?: string) {
+  const members = roomMemberNames(room);
+  if (members.length > 0) {
+    return members.length === 1 ? `${members[0]} + очікуємо партнера` : members.join(" + ");
+  }
+  return fallbackName ? `${fallbackName} + очікуємо партнера` : "Очікуємо гравців";
+}
+
+function RoomRosterCard({ room, activeName }: { room: Room; activeName: string }) {
+  const members = [
+    { label: room.user_1_name, role: "Creator" },
+    { label: room.user_2_name ?? "Очікуємо партнера", role: "Partner" },
+  ];
+
+  return (
+    <Card className="card-duo">
+      <CardContent className="space-y-3 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.14em] text-[#9f5660]">Room {roomCode(room.id)}</p>
+            <p className="text-base font-black text-[#351316]">{roomMemberLine(room)}</p>
+          </div>
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#fff1f3] text-[#be123c]">
+            <Users className="h-5 w-5" />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          {members.map((member) => (
+            <div
+              key={member.role}
+              className={`min-w-0 rounded-2xl border-2 px-3 py-2 ${
+                member.label === activeName ? "border-[#e11d48] bg-[#fff1f3]" : "border-[#ffe4e8] bg-[#fff7f8]"
+              }`}
+            >
+              <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#9f5660]">{member.role}</p>
+              <p className="truncate text-sm font-black text-[#351316]">{member.label}</p>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 function FoodPreviewButton({
@@ -130,7 +195,7 @@ function FoodPreviewButton({
         <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-[#fff1f3] text-2xl">🍽️</div>
       )}
       <span className="min-w-0">
-        <span className="block truncate text-base font-black text-[#351316]">{food.name}</span>
+        <span className="block truncate text-base font-black text-[#351316]">{foodText.name}</span>
         {foodText.ingredients ? (
           <span className="mt-0.5 block truncate text-xs font-bold text-[#7a3a43]">{foodText.ingredients}</span>
         ) : null}
@@ -146,15 +211,15 @@ export default function RoomPage() {
 
   const [room, setRoom] = useState<Room | null>(null);
   const [savedRooms, setSavedRooms] = useState<LocalRoom[]>([]);
+  const [savedRoomDetails, setSavedRoomDetails] = useState<RoomMap>({});
   const [name, setName] = useState("");
   const [joinName, setJoinName] = useState("");
   const [isJoining, setIsJoining] = useState(false);
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
   const [loadingRoom, setLoadingRoom] = useState(true);
   const [loadingFoods, setLoadingFoods] = useState(false);
-  const [foodTypeFilter, setFoodTypeFilter] = useState<FilterValue>("all");
   const [mealTypeFilter, setMealTypeFilter] = useState<FilterValue>("all");
-  const [tagFilter, setTagFilter] = useState<FilterValue>("all");
+  const [mealKindFilter, setMealKindFilter] = useState<FilterValue>("all");
   const [filterOptions, setFilterOptions] = useState<FoodFilterOptions>(initialFilterOptions);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [foods, setFoods] = useState<Food[]>([]);
@@ -216,7 +281,7 @@ export default function RoomPage() {
       setSavedRooms(saveLocalRoom({
         id: data.id,
         playerName: storedName,
-        label: `${storedName}'s room`,
+        label: `Room ${roomCode(data.id)}`,
       }));
     }
   }, [roomId]);
@@ -245,22 +310,21 @@ export default function RoomPage() {
       return;
     }
 
-    const foodTypes = new Map<string, number>();
     const mealTypes = new Map<string, number>();
-    const tags = new Map<string, number>();
+    const mealKinds = new Map<string, number>();
 
     data.forEach((food) => {
-      if (food.food_type) foodTypes.set(food.food_type, (foodTypes.get(food.food_type) ?? 0) + 1);
       if (food.meal_type) mealTypes.set(food.meal_type, (mealTypes.get(food.meal_type) ?? 0) + 1);
       ((food.tags ?? []) as string[]).forEach((tag) => {
-        if (tag) tags.set(tag, (tags.get(tag) ?? 0) + 1);
+        if (mealKindValues.includes(tag)) {
+          mealKinds.set(tag, (mealKinds.get(tag) ?? 0) + 1);
+        }
       });
     });
 
     setFilterOptions({
-      foodTypes: sortedOptions(foodTypes, foodTypeLabels),
       mealTypes: sortedOptions(mealTypes, mealTypeLabels),
-      tags: sortedOptions(tags),
+      mealKinds: sortedOptions(mealKinds, mealKindLabels),
     });
   }, []);
 
@@ -285,6 +349,29 @@ export default function RoomPage() {
     mergeFoodsIntoMap([food]);
     return food;
   }, [foodMap, mergeFoodsIntoMap]);
+
+  const loadSavedRoomDetails = useCallback(async (rooms: LocalRoom[]) => {
+    if (!supabase || rooms.length === 0) {
+      setSavedRoomDetails({});
+      return;
+    }
+
+    const { data, error: roomsError } = await supabase
+      .from("rooms")
+      .select("*")
+      .in("id", rooms.map((savedRoom) => savedRoom.id));
+
+    if (roomsError) {
+      setError(formatSupabaseError("Не вдалося завантажити список кімнат", roomsError));
+      return;
+    }
+
+    const nextDetails: RoomMap = {};
+    ((data ?? []) as Room[]).forEach((savedRoom) => {
+      nextDetails[savedRoom.id] = savedRoom;
+    });
+    setSavedRoomDetails(nextDetails);
+  }, []);
 
   const showMatch = useCallback((food: Food, source: "mine" | "partner") => {
     setMatchFood(food);
@@ -351,14 +438,11 @@ export default function RoomPage() {
     const swipedIds = [...swipedIdsRef.current];
 
     let query = supabase.from("foods").select("*").in("source", visibleFoodSources).order("created_at", { ascending: false }).limit(36);
-    if (foodTypeFilter !== "all") {
-      query = query.eq("food_type", foodTypeFilter);
-    }
     if (mealTypeFilter !== "all") {
       query = query.eq("meal_type", mealTypeFilter);
     }
-    if (tagFilter !== "all") {
-      query = query.contains("tags", [tagFilter]);
+    if (mealKindFilter !== "all") {
+      query = query.contains("tags", [mealKindFilter]);
     }
 
     if (swipedIds.length > 0) {
@@ -379,7 +463,7 @@ export default function RoomPage() {
       return dedupeFoods([...prev, ...incomingFoods]);
     });
     mergeFoodsIntoMap(incomingFoods);
-  }, [foodTypeFilter, mealTypeFilter, mergeFoodsIntoMap, name, room, tagFilter]);
+  }, [mealKindFilter, mealTypeFilter, mergeFoodsIntoMap, name, room]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -452,9 +536,8 @@ export default function RoomPage() {
   };
 
   const clearFilters = () => {
-    setFoodTypeFilter("all");
     setMealTypeFilter("all");
-    setTagFilter("all");
+    setMealKindFilter("all");
   };
 
   const joinRoom = async () => {
@@ -483,7 +566,7 @@ export default function RoomPage() {
     setSavedRooms(saveLocalRoom({
       id: room.id,
       playerName: trimmed,
-      label: `${trimmed}'s room`,
+      label: `Room ${roomCode(room.id)}`,
     }));
     setName(trimmed);
     await refreshRoom();
@@ -524,7 +607,7 @@ export default function RoomPage() {
     setSavedRooms(saveLocalRoom({
       id: data.id,
       playerName: trimmedName,
-      label: `${trimmedName}'s room`,
+      label: `Room ${roomCode(data.id)}`,
     }));
     router.push(`/room/${data.id}`);
   };
@@ -578,7 +661,7 @@ export default function RoomPage() {
   };
 
   const translateFood = async (food: Food) => {
-    if (!food.ingredients && !food.instructions) return;
+    if (!food.name && !food.ingredients && !food.instructions) return;
     if (translatedFoods[food.id]) return;
 
     setError("");
@@ -591,6 +674,7 @@ export default function RoomPage() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
+          name: food.name,
           ingredients: food.ingredients,
           instructions: food.instructions,
         }),
@@ -729,9 +813,8 @@ export default function RoomPage() {
   const topCard = foods[0];
   const matches = dedupeFoods(myLikes.filter((foodId) => theirLikes.includes(foodId)).map((foodId) => foodMap[foodId]).filter(isFood));
   const matchesActiveFilters = (food: Food) => {
-    if (foodTypeFilter !== "all" && food.food_type !== foodTypeFilter) return false;
     if (mealTypeFilter !== "all" && food.meal_type !== mealTypeFilter) return false;
-    if (tagFilter !== "all" && !food.tags.includes(tagFilter)) return false;
+    if (mealKindFilter !== "all" && !food.tags.includes(mealKindFilter)) return false;
     return true;
   };
   const filteredMatches = matches.filter(matchesActiveFilters);
@@ -739,14 +822,15 @@ export default function RoomPage() {
   const theirWants = theirLikes;
   const myTasteFoods = dedupeFoods(myWants.map((foodId) => foodMap[foodId]).filter(isFood)).filter(matchesActiveFilters);
   const partnerTasteFoods = dedupeFoods(theirWants.map((foodId) => foodMap[foodId]).filter(isFood)).filter(matchesActiveFilters);
-  const hasActiveFilters = foodTypeFilter !== "all" || mealTypeFilter !== "all" || tagFilter !== "all";
+  const hasActiveFilters = mealTypeFilter !== "all" || mealKindFilter !== "all";
   const filterSummary = [
-    optionLabel(filterOptions.foodTypes, foodTypeFilter),
     mealTypeFilter !== "all" ? optionLabel(filterOptions.mealTypes, mealTypeFilter) : "",
-    tagFilter !== "all" ? optionLabel(filterOptions.tags, tagFilter) : "",
+    mealKindFilter !== "all" ? optionLabel(filterOptions.mealKinds, mealKindFilter) : "",
   ].filter(Boolean);
+  const filterSummaryText = filterSummary.length > 0 ? filterSummary.join(" · ") : "Усі";
   const topCardText = topCard ? getFoodText(topCard, translatedFoods[topCard.id]) : null;
   const selectedFoodText = selectedFood ? getFoodText(selectedFood, translatedFoods[selectedFood.id]) : null;
+  const matchFoodText = matchFood ? getFoodText(matchFood, translatedFoods[matchFood.id]) : null;
 
   return (
     <main className="mx-auto flex min-h-[100svh] w-full max-w-md flex-col gap-3 bg-[#fff5f6] px-3 py-3 pb-[calc(6.25rem+env(safe-area-inset-bottom))] text-[#351316] sm:px-4">
@@ -765,7 +849,9 @@ export default function RoomPage() {
             type="button"
             variant="outline"
             onClick={() => {
-              setSavedRooms(getLocalRooms());
+              const rooms = getLocalRooms();
+              setSavedRooms(rooms);
+              void loadSavedRoomDetails(rooms);
               setRoomsOpen(true);
             }}
             className="h-11 w-11 rounded-full border-2 border-[#ffd1d8] bg-white p-0 text-[#be123c] shadow-[0_4px_0_#ffd1d8]"
@@ -794,6 +880,7 @@ export default function RoomPage() {
           </Button>
         </div>
       </div>
+      <RoomRosterCard room={room} activeName={name || joinName} />
       {needsLocalSession ? (
         <Card className="card-duo">
           <CardHeader>
@@ -805,12 +892,15 @@ export default function RoomPage() {
           </CardContent>
         </Card>
       ) : needsJoin ? (
-        <Card className="card-duo">
-          <CardHeader>
-            <CardTitle className="text-xl font-black">Тебе запросили на FoodMatch</CardTitle>
+        <Card className="card-duo overflow-hidden">
+          <CardHeader className="items-center text-center">
+            <div className="mb-1 flex h-16 w-16 items-center justify-center rounded-[1.35rem] bg-[#e11d48] text-white shadow-[0_8px_0_#9f1239]">
+              <Cherry className="h-8 w-8" />
+            </div>
+            <CardTitle className="text-2xl font-black">FoodMatch інвайт</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <p className="text-sm font-bold leading-6 text-[#7a3a43]">
+            <p className="text-center text-sm font-bold leading-6 text-[#7a3a43]">
               Шлях до твого серця лежить через шлунок. Введи ім&apos;я і свайпайте разом, щоб знайти ваш смачний метч.
             </p>
             <Input
@@ -850,7 +940,7 @@ export default function RoomPage() {
             >
               <span className="flex min-w-0 items-center gap-2 text-sm font-black text-[#351316]">
                 <SlidersHorizontal className="h-4 w-4 shrink-0 text-[#e11d48]" />
-                <span className="truncate">{filterSummary.join(" · ")}</span>
+                <span className="truncate">{filterSummaryText}</span>
               </span>
               {hasActiveFilters ? <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#ff4b4b]" /> : null}
             </button>
@@ -879,7 +969,7 @@ export default function RoomPage() {
                   }}
                   className="relative flex h-[clamp(390px,calc(100svh-232px),620px)] cursor-pointer flex-col overflow-hidden rounded-[1.8rem] border-2 border-[#ffd1d8] bg-white shadow-[0_8px_0_#ffd1d8]"
                 >
-                  {(topCard.ingredients || topCard.instructions) ? (
+                  {(topCard.name || topCard.ingredients || topCard.instructions) ? (
                     <Button
                       type="button"
                       variant="outline"
@@ -902,7 +992,7 @@ export default function RoomPage() {
                   )}
                   <div className="shrink-0 space-y-3 p-4">
                     <div className="space-y-1.5">
-                      <h2 className="line-clamp-2 text-2xl font-black leading-tight text-[#351316]">{topCard.name}</h2>
+                      <h2 className="line-clamp-2 text-2xl font-black leading-tight text-[#351316]">{topCardText?.name}</h2>
                       {topCardText?.ingredients ? (
                         <p className="line-clamp-1 text-sm font-bold leading-5 text-[#7a3a43]">{topCardText.ingredients}</p>
                       ) : null}
@@ -971,7 +1061,7 @@ export default function RoomPage() {
             >
               <span className="flex min-w-0 items-center gap-2 text-sm font-black text-[#351316]">
                 <SlidersHorizontal className="h-4 w-4 shrink-0 text-[#e11d48]" />
-                <span className="truncate">{filterSummary.join(" · ")}</span>
+                <span className="truncate">{filterSummaryText}</span>
               </span>
               {hasActiveFilters ? <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#ff4b4b]" /> : null}
             </button>
@@ -1090,7 +1180,7 @@ export default function RoomPage() {
                 <Heart className="h-5 w-5 fill-white" />
               </div>
               <div className="min-w-0">
-                <p className="text-sm font-black text-[#351316]">Match on {recentMatch.food.name}</p>
+                <p className="text-sm font-black text-[#351316]">Match on {getFoodText(recentMatch.food, translatedFoods[recentMatch.food.id]).name}</p>
                 <p className="truncate text-xs font-bold text-[#9f5660]">{otherName} теж хоче це</p>
               </div>
             </div>
@@ -1127,28 +1217,31 @@ export default function RoomPage() {
 
           <div className="space-y-3 overflow-y-auto">
             {savedRooms.length > 0 ? (
-              savedRooms.map((savedRoom) => (
-                <button
-                  key={savedRoom.id}
-                  type="button"
-                  onClick={() => switchRoom(savedRoom.id)}
-                  className={`flex w-full items-center justify-between gap-3 rounded-2xl border-2 p-3 text-left transition ${
-                    savedRoom.id === roomId
-                      ? "border-[#e11d48] bg-[#fff1f3]"
-                      : "border-[#ffd1d8] bg-white hover:bg-[#fff7f8]"
-                  }`}
-                >
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm font-black text-[#351316]">{savedRoom.label}</span>
-                    <span className="block truncate text-xs font-bold text-[#9f5660]">Гравець: {savedRoom.playerName}</span>
-                  </span>
-                  {savedRoom.id === roomId ? (
-                    <Check className="h-5 w-5 shrink-0 text-[#e11d48]" />
-                  ) : (
-                    <ArrowRight className="h-5 w-5 shrink-0 text-[#be123c]" />
-                  )}
-                </button>
-              ))
+              savedRooms.map((savedRoom) => {
+                const savedRoomDetail = savedRoomDetails[savedRoom.id];
+                return (
+                  <button
+                    key={savedRoom.id}
+                    type="button"
+                    onClick={() => switchRoom(savedRoom.id)}
+                    className={`flex w-full items-center justify-between gap-3 rounded-2xl border-2 p-3 text-left transition ${
+                      savedRoom.id === roomId
+                        ? "border-[#e11d48] bg-[#fff1f3]"
+                        : "border-[#ffd1d8] bg-white hover:bg-[#fff7f8]"
+                    }`}
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-black text-[#351316]">Room {roomCode(savedRoom.id)}</span>
+                      <span className="block truncate text-xs font-bold text-[#9f5660]">{roomMemberLine(savedRoomDetail, savedRoom.playerName)}</span>
+                    </span>
+                    {savedRoom.id === roomId ? (
+                      <Check className="h-5 w-5 shrink-0 text-[#e11d48]" />
+                    ) : (
+                      <ArrowRight className="h-5 w-5 shrink-0 text-[#be123c]" />
+                    )}
+                  </button>
+                );
+              })
             ) : (
               <p className="rounded-2xl bg-[#fff7f8] p-3 text-sm font-bold leading-6 text-[#7a3a43]">
                 На цьому пристрої ще немає збережених кімнат.
@@ -1202,27 +1295,6 @@ export default function RoomPage() {
 
           <div className="space-y-5 overflow-y-auto pb-1">
             <section className="space-y-2">
-              <p className="text-xs font-black uppercase tracking-[0.14em] text-[#9f5660]">Що свайпаємо</p>
-              <div className="grid grid-cols-3 gap-2">
-                {filterOptions.foodTypes.map((option) => (
-                  <Button
-                    key={option.value}
-                    type="button"
-                    variant="ghost"
-                    onClick={() => setFoodTypeFilter(option.value)}
-                    className={`h-12 rounded-2xl border-2 px-2 text-sm font-black ${
-                      foodTypeFilter === option.value
-                        ? "border-[#9f1239] bg-[#e11d48] text-white"
-                        : "border-[#ffe4e8] bg-[#fff7f8] text-[#7a3a43]"
-                    }`}
-                  >
-                    {option.label}
-                  </Button>
-                ))}
-              </div>
-            </section>
-
-            <section className="space-y-2">
               <p className="text-xs font-black uppercase tracking-[0.14em] text-[#9f5660]">Коли їмо</p>
               <div className="grid grid-cols-2 gap-2">
                 {filterOptions.mealTypes.map((option) => (
@@ -1244,26 +1316,24 @@ export default function RoomPage() {
             </section>
 
             <section className="space-y-2">
-              <p className="text-xs font-black uppercase tracking-[0.14em] text-[#9f5660]">Категорії, кухні, інгредієнти</p>
-              <div className="max-h-64 overflow-y-auto rounded-2xl border-2 border-[#ffe4e8] bg-[#fff7f8] p-2">
-                <div className="flex flex-wrap gap-2">
-                  {filterOptions.tags.map((option) => (
-                    <Button
-                      key={option.value}
-                      type="button"
-                      variant="ghost"
-                      onClick={() => setTagFilter(option.value)}
-                      className={`h-10 rounded-full border-2 px-3 text-xs font-black ${
-                        tagFilter === option.value
-                          ? "border-[#9f1239] bg-[#e11d48] text-white"
-                          : "border-[#ffd1d8] bg-white text-[#7a3a43]"
-                      }`}
-                    >
-                      {option.label}
-                      {option.count ? <span className="ml-1 opacity-70">{option.count}</span> : null}
-                    </Button>
-                  ))}
-                </div>
+              <p className="text-xs font-black uppercase tracking-[0.14em] text-[#9f5660]">Тип страви</p>
+              <div className="grid grid-cols-2 gap-2">
+                {filterOptions.mealKinds.map((option) => (
+                  <Button
+                    key={option.value}
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setMealKindFilter(option.value)}
+                    className={`h-11 rounded-2xl border-2 px-2 text-sm font-black ${
+                      mealKindFilter === option.value
+                        ? "border-[#9f1239] bg-[#e11d48] text-white"
+                        : "border-[#ffe4e8] bg-[#fff7f8] text-[#7a3a43]"
+                    }`}
+                  >
+                    {option.label}
+                    {option.count ? <span className="ml-1 opacity-70">{option.count}</span> : null}
+                  </Button>
+                ))}
               </div>
             </section>
 
@@ -1306,8 +1376,8 @@ export default function RoomPage() {
           <div className="space-y-4 p-5">
             <DialogHeader>
               <div className="flex items-start justify-between gap-3">
-                <DialogTitle className="text-left text-2xl font-black leading-tight text-[#351316]">{selectedFood?.name}</DialogTitle>
-                {selectedFood && (selectedFood.ingredients || selectedFood.instructions) ? (
+                <DialogTitle className="text-left text-2xl font-black leading-tight text-[#351316]">{selectedFoodText?.name}</DialogTitle>
+                {selectedFood && (selectedFood.name || selectedFood.ingredients || selectedFood.instructions) ? (
                   <Button
                     type="button"
                     variant="outline"
@@ -1337,38 +1407,71 @@ export default function RoomPage() {
 
       <Dialog open={Boolean(matchFood)} onOpenChange={(open) => !open && setMatchFood(null)}>
         <DialogContent showCloseButton={false} className="card-duo overflow-hidden p-0 sm:max-w-md">
-          <div className="relative min-h-72 overflow-hidden bg-[#fff1f3] px-5 pb-5 pt-8 text-center">
-            {[...Array(18)].map((_, index) => (
+          <div className="relative min-h-80 overflow-hidden bg-[#fff1f3] px-5 pb-5 pt-8 text-center">
+            {[...Array(14)].map((_, index) => (
               <motion.span
-                key={index}
-                className="absolute text-[#e11d48]"
+                key={`left-${index}`}
+                className="absolute left-5 text-[#e11d48]/70"
                 initial={{
                   opacity: 0,
-                  x: 170,
-                  y: 132,
-                  rotate: 0,
-                  scale: 0.4,
+                  y: -40,
+                  x: (index % 3) * 18,
+                  rotate: -16,
+                  scale: 0.55,
                 }}
                 animate={{
-                  opacity: [0, 1, 1, 0],
-                  x: 170 + Math.cos(index * 0.9) * (90 + (index % 5) * 18),
-                  y: 132 + Math.sin(index * 1.2) * (78 + (index % 4) * 14),
-                  rotate: index % 2 === 0 ? 26 : -24,
-                  scale: [0.4, 1.1, 0.95],
+                  opacity: [0, 1, 0.9, 0],
+                  y: 300,
+                  x: (index % 3) * 18 + Math.sin(index) * 18,
+                  rotate: -16 + index * 6,
+                  scale: [0.55, 1, 0.8],
                 }}
-                transition={{ duration: 1.8, delay: index * 0.035, ease: "easeOut" }}
+                transition={{ duration: 2.4, delay: index * 0.08, ease: "easeInOut" }}
               >
                 <Heart className="h-5 w-5 fill-current" />
               </motion.span>
             ))}
-            <div className="relative mx-auto mb-4 flex h-24 w-24 items-center justify-center rounded-[2rem] bg-[#e11d48] text-white shadow-[0_10px_0_#9f1239]">
-              <Heart className="h-12 w-12 fill-white" />
-              <Sparkles className="absolute -right-2 -top-2 h-8 w-8 text-[#fbbf24]" />
+            {[...Array(14)].map((_, index) => (
+              <motion.span
+                key={`right-${index}`}
+                className="absolute right-5 text-[#e11d48]/70"
+                initial={{
+                  opacity: 0,
+                  y: -40,
+                  x: -(index % 3) * 18,
+                  rotate: 16,
+                  scale: 0.55,
+                }}
+                animate={{
+                  opacity: [0, 1, 0.9, 0],
+                  y: 300,
+                  x: -(index % 3) * 18 + Math.cos(index) * 18,
+                  rotate: 16 - index * 6,
+                  scale: [0.55, 1, 0.8],
+                }}
+                transition={{ duration: 2.4, delay: index * 0.08, ease: "easeInOut" }}
+              >
+                <Heart className="h-5 w-5 fill-current" />
+              </motion.span>
+            ))}
+            <div className="relative z-10 mx-auto mb-5 flex w-40 items-center justify-center">
+              <div className="h-28 w-28 overflow-hidden rounded-full border-4 border-white bg-white shadow-[0_12px_34px_rgba(154,25,42,0.24)]">
+                {matchFood?.image_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={matchFood.image_url} alt={matchFoodText?.name ?? ""} className="h-full w-full object-cover" />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center bg-[#fff7f8] text-5xl">🍽️</div>
+                )}
+              </div>
+              <div className="h-1 w-9 rounded-full bg-[#e11d48]" />
+              <div className="flex h-14 w-14 items-center justify-center rounded-full border-4 border-white bg-[#e11d48] text-white shadow-[0_10px_24px_rgba(154,25,42,0.24)]">
+                <Heart className="h-7 w-7 fill-white" />
+              </div>
             </div>
             <DialogHeader>
-              <DialogTitle className="text-center text-4xl font-black leading-none text-[#351316]">It&apos;s a match</DialogTitle>
+              <DialogTitle className="relative z-10 text-center text-4xl font-black leading-none text-[#351316]">It&apos;s a match</DialogTitle>
               <DialogDescription className="mx-auto mt-3 max-w-xs text-center text-base font-bold leading-6 text-[#7a3a43]">
-                Ви обоє хочете {matchFood?.name}. Схоже, вечеря сама себе обрала.
+                Ви обоє хочете {matchFoodText?.name}. Схоже, вечеря сама себе обрала.
               </DialogDescription>
           </DialogHeader>
           </div>

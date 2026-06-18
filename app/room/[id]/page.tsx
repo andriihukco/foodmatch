@@ -25,6 +25,8 @@ type RoomMap = Record<string, Room>;
 type FilterValue = string;
 type SwipeDirection = SwipeAction | null;
 type LastSwipe = { food: Food; action: SwipeAction } | null;
+type MainTab = "swipe" | "results";
+type ResultView = "matches" | "mine" | "partner";
 type FilterOption = { value: string; label: string; count?: number; foodTypes?: string[]; tagsAny?: string[]; mealTypes?: string[] };
 type FilterableFood = Pick<Food, "food_type" | "meal_type" | "tags">;
 type FoodFilterOptions = {
@@ -70,6 +72,18 @@ const initialFilterOptions: FoodFilterOptions = {
 };
 
 const visibleFoodSources = ["themealdb-ingredient-list", "themealdb-meal-list"];
+
+function roomUiStorageKey(roomId: string) {
+  return `foodmatch:room:${roomId}:ui`;
+}
+
+function isMainTab(value: string): value is MainTab {
+  return value === "swipe" || value === "results";
+}
+
+function isResultView(value: string): value is ResultView {
+  return value === "matches" || value === "mine" || value === "partner";
+}
 
 function dedupeFoods(items: Food[]) {
   const seen = new Set<string>();
@@ -182,7 +196,9 @@ export default function RoomPage() {
   const [, setTheirDislikes] = useState<string[]>([]);
   const [matchFood, setMatchFood] = useState<Food | null>(null);
   const [error, setError] = useState("");
-  const [resultView, setResultView] = useState<"matches" | "mine" | "partner">("matches");
+  const [mainTab, setMainTab] = useState<MainTab>("swipe");
+  const [resultView, setResultView] = useState<ResultView>("matches");
+  const [uiHydrated, setUiHydrated] = useState(false);
   const [swipeDirection, setSwipeDirection] = useState<SwipeDirection>(null);
   const [swipingFoodId, setSwipingFoodId] = useState<string | null>(null);
   const [lastSwipe, setLastSwipe] = useState<LastSwipe>(null);
@@ -455,6 +471,50 @@ export default function RoomPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void refreshRoom();
   }, [refreshRoom]);
+
+  useEffect(() => {
+    const restoreState = window.setTimeout(() => {
+      const rawState = window.localStorage.getItem(roomUiStorageKey(roomId));
+      if (rawState) {
+        try {
+          const savedState = JSON.parse(rawState) as {
+            foodTypeFilter?: unknown;
+            dishKindFilter?: unknown;
+            mainTab?: unknown;
+            resultView?: unknown;
+          };
+          if (typeof savedState.foodTypeFilter === "string") {
+            setFoodTypeFilter(savedState.foodTypeFilter);
+          }
+          if (typeof savedState.dishKindFilter === "string") {
+            setDishKindFilter(savedState.dishKindFilter);
+          }
+          if (typeof savedState.mainTab === "string" && isMainTab(savedState.mainTab)) {
+            setMainTab(savedState.mainTab);
+          }
+          if (typeof savedState.resultView === "string" && isResultView(savedState.resultView)) {
+            setResultView(savedState.resultView);
+          }
+        } catch (parseError) {
+          console.warn("Unable to read saved FoodMatch room UI state.", parseError);
+          window.localStorage.removeItem(roomUiStorageKey(roomId));
+        }
+      }
+      setUiHydrated(true);
+    }, 0);
+
+    return () => window.clearTimeout(restoreState);
+  }, [roomId]);
+
+  useEffect(() => {
+    if (!uiHydrated) return;
+    window.localStorage.setItem(roomUiStorageKey(roomId), JSON.stringify({
+      foodTypeFilter,
+      dishKindFilter,
+      mainTab,
+      resultView,
+    }));
+  }, [dishKindFilter, foodTypeFilter, mainTab, resultView, roomId, uiHydrated]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -840,7 +900,7 @@ export default function RoomPage() {
   const matchFoodText = matchFood ? getFoodText(matchFood, translatedFoods[matchFood.id]) : null;
 
   return (
-    <main className="mx-auto flex min-h-[100svh] w-full max-w-md flex-col gap-3 bg-[#fff5f6] px-3 py-3 pb-[calc(6.25rem+env(safe-area-inset-bottom))] text-[#351316] sm:px-4">
+    <main className="mx-auto flex h-[100svh] w-full max-w-md flex-col gap-2 overflow-hidden bg-[#fff5f6] px-3 py-3 pb-[calc(5.75rem+env(safe-area-inset-bottom))] text-[#351316] sm:px-4">
       {!needsJoin ? <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#e11d48] shadow-[0_3px_0_#f8cbd2]">
@@ -889,30 +949,46 @@ export default function RoomPage() {
           </CardContent>
         </Card>
       ) : needsJoin ? (
-        <Card className="card-duo mt-6 overflow-hidden">
-          <CardHeader className="text-left">
-            <p className="text-xs font-black uppercase tracking-[0.14em] text-[#9f5660]">Room {roomCode(room.id)}</p>
-            <CardTitle className="text-2xl font-black leading-tight">Запрошення від {room.user_1_name}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-sm font-bold leading-6 text-[#7a3a43]">
-              Введи ім&apos;я, щоб приєднатись до кімнати і почати свайпати разом.
+        <section className="relative -mx-3 -my-3 flex min-h-[100svh] w-[calc(100%+1.5rem)] items-center justify-center overflow-hidden bg-[#fff5f6] px-5 py-8">
+          <div className="absolute left-1/2 top-0 h-64 w-64 -translate-x-1/2 rounded-full bg-[#ffd1d8] blur-3xl" />
+          <div className="absolute -bottom-20 -left-20 h-56 w-56 rounded-full bg-[#ffe8a3] blur-3xl" />
+          <div className="absolute -right-24 bottom-16 h-64 w-64 rounded-full bg-[#c7e8a7] blur-3xl" />
+          <div className="relative w-full max-w-sm text-center">
+            <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-[1.7rem] bg-[#e11d48] shadow-[0_6px_0_#f8cbd2]">
+              <Cherry className="h-10 w-10 text-white" />
+            </div>
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-[#9f5660]">Room {roomCode(room.id)}</p>
+            <h1 className="mt-2 text-4xl font-black leading-none text-[#351316]">FoodMatch</h1>
+            <p className="mx-auto mt-3 max-w-xs text-base font-extrabold leading-6 text-[#7a3a43]">
+              {room.user_1_name} кличе тебе знайти страву, яку ви обоє захочете прямо зараз.
             </p>
-            <Input
-              value={joinName}
-              onChange={(event) => setJoinName(event.target.value)}
-              placeholder="Твоє ім'я"
-              className="h-12 rounded-2xl border-2 border-[#ffd1d8] text-base font-bold"
-            />
-            <Button onClick={joinRoom} disabled={isJoining} className="btn-duo-primary h-12 w-full rounded-2xl text-base">
-              {isJoining ? <Loader2 className="animate-spin" /> : null}
-              Прийняти інвайт
-            </Button>
-          </CardContent>
-        </Card>
+            <div className="mt-8 rounded-[2rem] border-2 border-[#ffd1d8] bg-white/90 p-4 text-left shadow-[0_4px_0_#ffe9ed] backdrop-blur">
+              <label className="text-xs font-black uppercase tracking-[0.14em] text-[#9f5660]" htmlFor="join-name">
+                Як тебе записати?
+              </label>
+              <Input
+                id="join-name"
+                value={joinName}
+                onChange={(event) => setJoinName(event.target.value)}
+                placeholder="Твоє ім'я"
+                className="mt-3 h-14 rounded-2xl border-2 border-[#ffd1d8] bg-white text-base font-bold"
+              />
+              <Button onClick={joinRoom} disabled={isJoining} className="btn-duo-primary mt-4 h-14 w-full rounded-2xl text-base">
+                {isJoining ? <Loader2 className="animate-spin" /> : <Heart className="h-5 w-5 fill-white" />}
+                Прийняти інвайт
+              </Button>
+            </div>
+          </div>
+        </section>
       ) : (
-        <Tabs defaultValue="swipe" className="w-full">
-          <TabsContent value="swipe" className="space-y-4">
+        <Tabs
+          value={mainTab}
+          onValueChange={(value) => {
+            if (isMainTab(value)) setMainTab(value);
+          }}
+          className="min-h-0 w-full flex-1"
+        >
+          <TabsContent value="swipe" className="min-h-0 space-y-3">
             <button
               type="button"
               onClick={() => setFiltersOpen(true)}
@@ -926,7 +1002,7 @@ export default function RoomPage() {
             </button>
 
             {topCard ? (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 <AnimatePresence mode="wait" onExitComplete={() => setSwipeDirection(null)}>
                   <motion.div
                     key={topCard.id}
@@ -958,7 +1034,7 @@ export default function RoomPage() {
                         setSelectedFood(topCard);
                       }
                     }}
-                    className="relative flex h-[clamp(320px,calc(100svh-286px),560px)] touch-pan-y cursor-grab flex-col overflow-hidden rounded-[1.8rem] border-2 border-[#ffd1d8] bg-white shadow-[0_4px_0_#ffe9ed] active:cursor-grabbing"
+                    className="relative flex h-[clamp(300px,calc(100svh-302px),520px)] touch-pan-y cursor-grab flex-col overflow-hidden rounded-[1.8rem] border-2 border-[#ffd1d8] bg-white shadow-[0_4px_0_#ffe9ed] active:cursor-grabbing"
                   >
                     {(topCard.name || topCard.ingredients || topCard.instructions) ? (
                       <Button
@@ -981,8 +1057,8 @@ export default function RoomPage() {
                     ) : (
                       <div className="flex min-h-0 flex-1 items-center justify-center bg-[#fff1f3] text-6xl">🍽️</div>
                     )}
-                    <div className="shrink-0 space-y-1.5 p-4">
-                      <h2 className="line-clamp-2 text-2xl font-black leading-tight text-[#351316]">{topCardText?.name}</h2>
+                    <div className="shrink-0 space-y-1 p-3.5">
+                      <h2 className="line-clamp-2 text-[1.35rem] font-black leading-tight text-[#351316]">{topCardText?.name}</h2>
                       {topCardText?.ingredients ? (
                         <p className="line-clamp-1 text-sm font-bold leading-5 text-[#7a3a43]">{topCardText.ingredients}</p>
                       ) : null}
@@ -993,7 +1069,7 @@ export default function RoomPage() {
                   <Button
                     disabled={!topCard || swipingFoodId !== null}
                     onClick={() => void swipe(topCard, "dislike")}
-                    className="btn-duo-danger h-16 w-16 rounded-full p-0 text-2xl shadow-[0_5px_16px_rgba(255,75,75,0.12)] disabled:bg-[#b7b7b7] disabled:border-[#929292]"
+                    className="btn-duo-danger h-14 w-14 rounded-full p-0 text-2xl shadow-[0_5px_16px_rgba(255,75,75,0.12)] disabled:bg-[#b7b7b7] disabled:border-[#929292]"
                     aria-label="Не хочу"
                   >
                     <ThumbsDown className="h-7 w-7" />
@@ -1003,7 +1079,7 @@ export default function RoomPage() {
                     variant="outline"
                     disabled={!lastSwipe || swipingFoodId !== null}
                     onClick={() => void undoLastSwipe()}
-                    className="h-12 w-12 rounded-full border-2 border-[#ffd1d8] bg-white p-0 text-[#7a3a43] shadow-[0_3px_0_#ffe9ed] disabled:opacity-40"
+                    className="h-11 w-11 rounded-full border-2 border-[#ffd1d8] bg-white p-0 text-[#7a3a43] shadow-[0_3px_0_#ffe9ed] disabled:opacity-40"
                     aria-label="Назад"
                   >
                     <RotateCcw className="h-5 w-5" />
@@ -1011,7 +1087,7 @@ export default function RoomPage() {
                   <Button
                     disabled={!topCard || swipingFoodId !== null}
                     onClick={() => void swipe(topCard, "like")}
-                    className="btn-duo-primary h-16 w-16 rounded-full p-0 text-2xl shadow-[0_5px_16px_rgba(225,29,72,0.12)] disabled:bg-[#b7b7b7] disabled:border-[#929292]"
+                    className="btn-duo-primary h-14 w-14 rounded-full p-0 text-2xl shadow-[0_5px_16px_rgba(225,29,72,0.12)] disabled:bg-[#b7b7b7] disabled:border-[#929292]"
                     aria-label="Хочу"
                   >
                     <ThumbsUp className="h-7 w-7" />
@@ -1034,7 +1110,7 @@ export default function RoomPage() {
             )}
           </TabsContent>
 
-          <TabsContent value="results" className="space-y-4">
+          <TabsContent value="results" className="min-h-0 space-y-3 overflow-y-auto pb-1 no-scrollbar">
             <button
               type="button"
               onClick={() => setFiltersOpen(true)}
@@ -1047,84 +1123,80 @@ export default function RoomPage() {
               {hasActiveFilters ? <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#ff4b4b]" /> : null}
             </button>
 
-            <Card className="card-duo">
-              <CardContent className="space-y-3 pt-5">
-                <div className="grid grid-cols-3 gap-2 rounded-[1.25rem] border-2 border-[#ffe4e8] bg-[#fff7f8] p-1">
-                  <Button
-                    variant="ghost"
-                    onClick={() => setResultView("matches")}
-                    className={`h-11 rounded-2xl px-2 text-sm font-black ${
-                      resultView === "matches" ? "bg-[#e11d48] text-white" : "text-[#7a3a43]"
-                    }`}
-                  >
-                    Matches
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    onClick={() => setResultView("mine")}
-                    className={`h-11 rounded-2xl px-2 text-sm font-black ${
-                      resultView === "mine" ? "bg-[#e11d48] text-white" : "text-[#7a3a43]"
-                    }`}
-                  >
-                    My Смаки
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    onClick={() => setResultView("partner")}
-                    className={`h-11 rounded-2xl px-2 text-sm font-black ${
-                      resultView === "partner" ? "bg-[#e11d48] text-white" : "text-[#7a3a43]"
-                    }`}
-                  >
-                    {otherName}&apos;s Смаки
-                  </Button>
-                </div>
+            <div className="grid grid-cols-3 gap-2 rounded-[1.25rem] border-2 border-[#ffe4e8] bg-white p-1 shadow-[0_3px_0_#ffe9ed]">
+              <Button
+                variant="ghost"
+                onClick={() => setResultView("matches")}
+                className={`h-11 rounded-2xl px-2 text-sm font-black ${
+                  resultView === "matches" ? "bg-[#e11d48] text-white" : "text-[#7a3a43]"
+                }`}
+              >
+                Метчі
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => setResultView("mine")}
+                className={`h-11 rounded-2xl px-2 text-sm font-black ${
+                  resultView === "mine" ? "bg-[#e11d48] text-white" : "text-[#7a3a43]"
+                }`}
+              >
+                Мої Смаки
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => setResultView("partner")}
+                className={`h-11 rounded-2xl px-2 text-sm font-black ${
+                  resultView === "partner" ? "bg-[#e11d48] text-white" : "text-[#7a3a43]"
+                }`}
+              >
+                {otherName || "Партнер"}
+              </Button>
+            </div>
 
-                {resultView === "matches" ? (
-                  filteredMatches.length > 0 ? (
-                    filteredMatches.map((match) => (
-                      <FoodPreviewButton
-                        key={match.id}
-                        food={match}
-                        translatedText={translatedFoods[match.id]}
-                        onClick={() => setSelectedFood(match)}
-                      />
-                    ))
-                  ) : (
-                    <p className="text-sm font-semibold text-[#6b7280]">Поки що метчів немає.</p>
-                  )
-                ) : null}
+            {resultView === "matches" ? (
+              filteredMatches.length > 0 ? (
+                filteredMatches.map((match) => (
+                  <FoodPreviewButton
+                    key={match.id}
+                    food={match}
+                    translatedText={translatedFoods[match.id]}
+                    onClick={() => setSelectedFood(match)}
+                  />
+                ))
+              ) : (
+                <p className="rounded-[1.35rem] border-2 border-[#ffe4e8] bg-white p-4 text-sm font-semibold text-[#6b7280] shadow-[0_3px_0_#ffe9ed]">Поки що метчів немає.</p>
+              )
+            ) : null}
 
-                {resultView === "mine" ? (
-                  myTasteFoods.length > 0 ? (
-                    myTasteFoods.map((food) => (
-                      <FoodPreviewButton
-                        key={food.id}
-                        food={food}
-                        translatedText={translatedFoods[food.id]}
-                        onClick={() => setSelectedFood(food)}
-                      />
-                    ))
-                  ) : (
-                    <p className="text-sm font-semibold text-[#6b7280]">Твоїх окремих смаків поки немає.</p>
-                  )
-                ) : null}
+            {resultView === "mine" ? (
+              myTasteFoods.length > 0 ? (
+                myTasteFoods.map((food) => (
+                  <FoodPreviewButton
+                    key={food.id}
+                    food={food}
+                    translatedText={translatedFoods[food.id]}
+                    onClick={() => setSelectedFood(food)}
+                  />
+                ))
+              ) : (
+                <p className="rounded-[1.35rem] border-2 border-[#ffe4e8] bg-white p-4 text-sm font-semibold text-[#6b7280] shadow-[0_3px_0_#ffe9ed]">Твоїх окремих смаків поки немає.</p>
+              )
+            ) : null}
 
-                {resultView === "partner" ? (
-                  partnerTasteFoods.length > 0 ? (
-                    partnerTasteFoods.map((food) => (
-                      <FoodPreviewButton
-                        key={food.id}
-                        food={food}
-                        translatedText={translatedFoods[food.id]}
-                        onClick={() => setSelectedFood(food)}
-                      />
-                    ))
-                  ) : (
-                    <p className="text-sm font-semibold text-[#6b7280]">Смаки партнера ще не відрізняються.</p>
-                  )
-                ) : null}
-              </CardContent>
-            </Card>
+            {resultView === "partner" ? (
+              partnerTasteFoods.length > 0 ? (
+                partnerTasteFoods.map((food) => (
+                  <FoodPreviewButton
+                    key={food.id}
+                    food={food}
+                    translatedText={translatedFoods[food.id]}
+                    onClick={() => setSelectedFood(food)}
+                  />
+                ))
+              ) : (
+                <p className="rounded-[1.35rem] border-2 border-[#ffe4e8] bg-white p-4 text-sm font-semibold text-[#6b7280] shadow-[0_3px_0_#ffe9ed]">Смаки партнера ще не відрізняються.</p>
+              )
+            ) : null}
           </TabsContent>
 
           <TabsList className="fixed inset-x-3 bottom-[calc(0.75rem+env(safe-area-inset-bottom))] z-30 mx-auto grid !h-[72px] w-[calc(100%-1.5rem)] max-w-md grid-cols-2 overflow-hidden rounded-[1.6rem] border-2 border-[#ffd1d8] bg-white/95 p-1.5 shadow-[0_4px_0_#ffe9ed] backdrop-blur">
@@ -1303,14 +1375,14 @@ export default function RoomPage() {
                     type="button"
                     variant="ghost"
                     onClick={() => setFoodTypeFilter(option.value)}
-                    className={`h-11 rounded-2xl border-2 px-2 text-sm font-black ${
+                    className={`flex h-14 flex-col gap-0.5 rounded-2xl border-2 px-1.5 text-center text-xs font-black leading-none !whitespace-normal ${
                       foodTypeFilter === option.value
                         ? "border-[#9f1239] bg-[#e11d48] text-white"
                         : "border-[#ffe4e8] bg-[#fff7f8] text-[#7a3a43]"
                     }`}
                   >
-                    {option.label}
-                    {option.count ? <span className="ml-1 opacity-70">{option.count}</span> : null}
+                    <span className="max-w-full truncate">{option.label}</span>
+                    <span className="min-h-3 opacity-70">{option.count ?? ""}</span>
                   </Button>
                 ))}
               </div>
@@ -1325,14 +1397,14 @@ export default function RoomPage() {
                     type="button"
                     variant="ghost"
                     onClick={() => setDishKindFilter(option.value)}
-                    className={`h-11 rounded-2xl border-2 px-2 text-sm font-black ${
+                    className={`flex h-14 flex-col gap-0.5 rounded-2xl border-2 px-1.5 text-center text-xs font-black leading-none !whitespace-normal ${
                       dishKindFilter === option.value
                         ? "border-[#9f1239] bg-[#e11d48] text-white"
                         : "border-[#ffe4e8] bg-[#fff7f8] text-[#7a3a43]"
                     }`}
                   >
-                    {option.label}
-                    {option.count ? <span className="ml-1 opacity-70">{option.count}</span> : null}
+                    <span className="max-w-full truncate">{option.label}</span>
+                    <span className="min-h-3 opacity-70">{option.count ?? ""}</span>
                   </Button>
                 ))}
               </div>
@@ -1407,7 +1479,7 @@ export default function RoomPage() {
       </Dialog>
 
       <Dialog open={Boolean(matchFood)} onOpenChange={(open) => !open && setMatchFood(null)}>
-        <DialogContent showCloseButton={false} className="card-duo overflow-hidden p-0 sm:max-w-md">
+        <DialogContent showCloseButton={false} className="card-duo overflow-hidden bg-[#fff1f3] p-0 sm:max-w-md">
           <div className="relative min-h-80 overflow-hidden bg-[#fff1f3] px-5 pb-5 pt-8 text-center">
             {[...Array(14)].map((_, index) => (
               <motion.span
@@ -1455,8 +1527,8 @@ export default function RoomPage() {
                 <Heart className="h-5 w-5 fill-current" />
               </motion.span>
             ))}
-            <div className="relative z-10 mx-auto mb-5 flex w-40 items-center justify-center">
-              <div className="h-28 w-28 overflow-hidden rounded-full border-4 border-white bg-white shadow-[0_8px_24px_rgba(154,25,42,0.12)]">
+            <div className="relative z-10 mx-auto mb-5 flex items-center justify-center">
+              <div className="h-24 w-24 overflow-hidden rounded-full border-4 border-white bg-white shadow-[0_8px_24px_rgba(154,25,42,0.12)]">
                 {matchFood?.image_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={matchFood.image_url} alt={matchFoodText?.name ?? ""} className="h-full w-full object-cover" />
@@ -1465,8 +1537,8 @@ export default function RoomPage() {
                 )}
               </div>
               <div className="h-1 w-9 rounded-full bg-[#e11d48]" />
-              <div className="flex h-14 w-14 items-center justify-center rounded-full border-4 border-white bg-[#e11d48] text-white shadow-[0_7px_18px_rgba(154,25,42,0.12)]">
-                <Heart className="h-7 w-7 fill-white" />
+              <div className="flex h-24 w-24 items-center justify-center rounded-full border-4 border-white bg-[#e11d48] text-white shadow-[0_7px_18px_rgba(154,25,42,0.12)]">
+                <Heart className="h-11 w-11 fill-white" />
               </div>
             </div>
             <DialogHeader>
@@ -1474,14 +1546,11 @@ export default function RoomPage() {
               <DialogDescription className="mx-auto mt-3 max-w-xs text-center text-base font-bold leading-6 text-[#7a3a43]">
                 Ви обоє хочете {matchFoodText?.name}. Схоже, вечеря сама себе обрала.
               </DialogDescription>
-          </DialogHeader>
+            </DialogHeader>
           </div>
-          <div className="grid gap-3 bg-white p-5">
-            <Button className="btn-duo-primary h-12 w-full" onClick={() => setMatchFood(null)}>
+          <div className="px-5 pb-5">
+            <Button variant="outline" className="h-12 w-full rounded-2xl border-2 border-[#ffd1d8] bg-white/70 font-black text-[#be123c]" onClick={() => setMatchFood(null)}>
               Продовжити свайпати
-            </Button>
-            <Button variant="outline" className="h-12 rounded-2xl border-2 border-[#ffd1d8] font-black text-[#be123c]" onClick={() => setMatchFood(null)}>
-              Закрити
             </Button>
           </div>
         </DialogContent>

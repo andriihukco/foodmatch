@@ -12,7 +12,8 @@
     "seed:themealdb": "SEED_SOURCE=themealdb tsx scripts/seed.ts",
     "seed:meals": "SEED_SOURCE=themealdb-meals tsx scripts/seed.ts",
     "seed:ingredients": "SEED_SOURCE=themealdb-ingredients tsx scripts/seed.ts",
-    "seed:products": "SEED_SOURCE=openfoodfacts tsx scripts/seed.ts"
+    "seed:products": "SEED_SOURCE=openfoodfacts tsx scripts/seed.ts",
+    "seed:filters": "SEED_SOURCE=openfoodfacts-filter-fill tsx scripts/seed.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

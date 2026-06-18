@@ -53,6 +53,12 @@ Import meal cards from Open Food Facts:
 OFF_CATEGORY_TAGS="meals" SEED_LIMIT=100 npm run seed:products
 ```
 
+Fill every swipe filter with Open Food Facts products. `SEED_LIMIT` applies per filter bucket:
+
+```bash
+SEED_LIMIT=250 npm run seed:filters
+```
+
 5. Start app:
 
 ```bash
@@ -80,6 +86,7 @@ Locally, `/admin` remains available on `localhost` for development.
 - Recipe source: `josephrmartinez/recipe-dataset` CSV with `Title`, `Ingredients`, and `Instructions`.
 - Recipe source: TheMealDB `random.php`.
 - Meal/product source: Open Food Facts API v2 search with `OFF_CATEGORY_TAGS=meals` by default.
+- Filter-fill source: Open Food Facts category/search presets for snacks, desserts, soups, starters, sides, pasta, seafood, vegetarian, and main dishes.
 - Ingredient cards: set `SEED_EXTRACT_INGREDIENTS=true` to create additional `ingredient` cards from parsed recipe/product tags.
 - Check source reuse terms before shipping imported data or images.
 

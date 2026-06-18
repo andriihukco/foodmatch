@@ -9,7 +9,7 @@ config();
 
 type FoodType = "recipe" | "ingredient" | "product" | "fastfood";
 type MealType = "breakfast" | "lunch" | "dinner" | "snack";
-type SeedSource = "json" | "recipe-dataset" | "openfoodfacts" | "themealdb" | "themealdb-ingredients" | "themealdb-meals";
+type SeedSource = "json" | "recipe-dataset" | "openfoodfacts" | "openfoodfacts-filter-fill" | "themealdb" | "themealdb-ingredients" | "themealdb-meals";
 
 type RawFood = {
   name: string;
@@ -71,12 +71,86 @@ type FoodInsert = {
   instructions: string | null;
 };
 
+type OpenFoodFactsFilter = {
+  value: string;
+  categoryTags: string[];
+  searchTerms: string[];
+  meal_type: MealType;
+  tags: string[];
+};
+
 const recipeDatasetUrl =
   "https://raw.githubusercontent.com/josephrmartinez/recipe-dataset/main/13k-recipes.csv";
+const openFoodFactsFilterFillSource = process.env.OFF_FILTER_FILL_SOURCE ?? "openfoodfacts-filter-fill-v2";
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const translationCache = new Map<string, string>();
 const transientStatuses = new Set([429, 500, 502, 503, 504]);
 const mealDbLetters = "abcdefghijklmnopqrstuvwxyz".split("");
+const openFoodFactsFilterPresets: OpenFoodFactsFilter[] = [
+  {
+    value: "snack",
+    categoryTags: ["snacks", "salty-snacks", "sweet-snacks", "crackers", "chips-and-fries", "biscuits-and-cakes"],
+    searchTerms: ["snack", "chips", "crackers", "nuts", "popcorn", "granola bar"],
+    meal_type: "snack",
+    tags: ["snack"],
+  },
+  {
+    value: "dessert",
+    categoryTags: ["desserts", "cakes", "ice-creams-and-sorbets", "chocolates", "cookies"],
+    searchTerms: ["dessert", "cake", "ice cream", "chocolate", "cookie"],
+    meal_type: "dinner",
+    tags: ["dessert"],
+  },
+  {
+    value: "soup",
+    categoryTags: ["soups", "canned-soups", "instant-soups"],
+    searchTerms: ["soup", "broth", "ramen"],
+    meal_type: "lunch",
+    tags: ["soup"],
+  },
+  {
+    value: "starter",
+    categoryTags: ["appetizers", "starters", "dips", "spreads"],
+    searchTerms: ["appetizer", "starter", "dip", "hummus"],
+    meal_type: "lunch",
+    tags: ["starter"],
+  },
+  {
+    value: "side",
+    categoryTags: ["side-dishes", "frozen-potatoes", "rice-dishes", "vegetable-mixes"],
+    searchTerms: ["side dish", "fries", "rice", "vegetables"],
+    meal_type: "dinner",
+    tags: ["side"],
+  },
+  {
+    value: "pasta",
+    categoryTags: ["pastas", "pasta-dishes", "fresh-pasta", "filled-pasta"],
+    searchTerms: ["pasta", "spaghetti", "ravioli", "lasagna"],
+    meal_type: "dinner",
+    tags: ["pasta"],
+  },
+  {
+    value: "seafood",
+    categoryTags: ["seafood", "fish-and-seafood", "fish", "canned-fish"],
+    searchTerms: ["seafood", "fish", "salmon", "tuna", "shrimp"],
+    meal_type: "dinner",
+    tags: ["seafood"],
+  },
+  {
+    value: "vegetarian",
+    categoryTags: ["vegetarian-foods", "vegan-foods", "plant-based-foods", "meat-alternatives"],
+    searchTerms: ["vegetarian", "vegan", "plant based", "tofu"],
+    meal_type: "dinner",
+    tags: ["vegetarian", "vegan"],
+  },
+  {
+    value: "main",
+    categoryTags: ["meals", "prepared-meals", "frozen-ready-made-meals", "pizzas-pies-and-quiches"],
+    searchTerms: ["meal", "dinner", "chicken", "beef", "pizza"],
+    meal_type: "dinner",
+    tags: ["chicken", "beef"],
+  },
+];
 const ingredientUkNames: Record<string, string> = {
   apple: "Яблуко",
   apricot: "Абрикос",
@@ -362,7 +436,7 @@ async function readOpenFoodFactsRows(searchTerms: string[], categoryTags: string
         image_url: product.image_front_url ?? null,
         food_type: "recipe",
         meal_type: "snack",
-        tags: compactTags(product.categories_tags ?? [request.categoryTag || request.searchTerm]),
+        tags: compactTags([...(product.categories_tags ?? []), request.categoryTag || request.searchTerm]),
         source: "openfoodfacts",
         external_id: product.code ?? name,
         ingredients: product.ingredients_text ?? null,
@@ -371,6 +445,79 @@ async function readOpenFoodFactsRows(searchTerms: string[], categoryTags: string
     }
 
     await sleep(1200);
+  }
+
+  return rows;
+}
+
+async function readOpenFoodFactsFilterFillRows(limitPerFilter: number): Promise<FoodInsert[]> {
+  const rows: FoodInsert[] = [];
+  const seenKeys = new Set<string>();
+  const pageSize = Math.min(100, Math.max(1, limitPerFilter));
+
+  for (const preset of openFoodFactsFilterPresets) {
+    const requests = [
+      ...preset.categoryTags.map((categoryTag) => ({ categoryTag, searchTerm: "" })),
+      ...preset.searchTerms.map((searchTerm) => ({ categoryTag: "", searchTerm })),
+    ];
+    let presetCount = 0;
+
+    for (const request of requests) {
+      if (presetCount >= limitPerFilter) break;
+      const url = new URL("https://world.openfoodfacts.org/api/v2/search");
+      if (request.categoryTag) {
+        url.searchParams.set("categories_tags", request.categoryTag);
+      }
+      if (request.searchTerm) {
+        url.searchParams.set("search_terms", request.searchTerm);
+      }
+      url.searchParams.set("page_size", String(pageSize));
+      url.searchParams.set(
+        "fields",
+        "code,product_name,product_name_en,generic_name,ingredients_text,image_front_url,categories_tags",
+      );
+
+      let payload: { products?: OpenFoodFactsProduct[] };
+      try {
+        payload = await fetchJsonWithRetry<{ products?: OpenFoodFactsProduct[] }>(url, {
+          headers: { "User-Agent": "FoodMatch/0.1 filter seed script" },
+        }, "Open Food Facts filter fill");
+      } catch (error) {
+        console.warn(
+          `Skipping Open Food Facts request for ${preset.value} (${request.categoryTag || request.searchTerm}):`,
+          error,
+        );
+        await sleep(2200);
+        continue;
+      }
+
+      for (const product of payload.products ?? []) {
+        if (presetCount >= limitPerFilter) break;
+        const name = product.product_name_en || product.product_name || product.generic_name;
+        const productKey = product.code ?? name;
+        if (!name || !productKey) continue;
+        const key = `${preset.value}:${productKey}`;
+        if (seenKeys.has(key)) continue;
+        seenKeys.add(key);
+
+        rows.push({
+          name,
+          image_url: product.image_front_url ?? null,
+          food_type: "recipe",
+          meal_type: preset.meal_type,
+          tags: compactTags([...preset.tags, request.categoryTag || request.searchTerm, ...(product.categories_tags ?? [])]),
+          source: openFoodFactsFilterFillSource,
+          external_id: key,
+          ingredients: product.ingredients_text ?? null,
+          instructions: null,
+        });
+        presetCount += 1;
+      }
+
+      await sleep(1200);
+    }
+
+    console.log(`Parsed ${presetCount} Open Food Facts rows for ${preset.value}.`);
   }
 
   return rows;
@@ -597,6 +744,8 @@ async function main() {
       .map((term) => term.trim())
       .filter(Boolean);
     rows = await readOpenFoodFactsRows(terms, categoryTags, limit);
+  } else if (source === "openfoodfacts-filter-fill") {
+    rows = await readOpenFoodFactsFilterFillRows(limit);
   } else if (source === "themealdb") {
     rows = await readThemealDbRows(limit);
   } else if (source === "themealdb-ingredients") {

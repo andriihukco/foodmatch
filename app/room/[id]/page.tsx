@@ -72,7 +72,13 @@ const initialFilterOptions: FoodFilterOptions = {
   dishKinds: dishKindFilterOptions,
 };
 
-const visibleFoodSources = ["themealdb-ingredient-list", "themealdb-meal-list", "josephrmartinez/recipe-dataset"];
+const visibleFoodSources = [
+  "themealdb-ingredient-list",
+  "themealdb-meal-list",
+  "josephrmartinez/recipe-dataset",
+  "openfoodfacts",
+  "openfoodfacts-filter-fill-v2",
+];
 
 function roomUiStorageKey(roomId: string) {
   return `foodmatch:room:${roomId}:ui`;
@@ -148,6 +154,21 @@ function matchesOption(food: FilterableFood, option: FilterOption | undefined) {
 function matchesAnyOption(food: FilterableFood, options: FilterOption[]) {
   if (options.length === 0) return true;
   return options.some((option) => matchesOption(food, option));
+}
+
+function rankSimilarTags(foods: Food[]) {
+  const tagCounts = new Map<string, number>();
+
+  foods.forEach((food) => {
+    food.tags.forEach((tag) => {
+      tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
+    });
+  });
+
+  return [...tagCounts.entries()]
+    .sort((first, second) => second[1] - first[1])
+    .map(([tag]) => tag)
+    .slice(0, 18);
 }
 
 function FoodImage({
@@ -254,6 +275,8 @@ export default function RoomPage() {
   const [recentMatch, setRecentMatch] = useState<RecentMatch | null>(null);
   const swipedIdsRef = useRef(new Set<string>());
   const myLikesRef = useRef<string[]>([]);
+  const theirLikesRef = useRef<string[]>([]);
+  const foodMapRef = useRef<FoodMap>({});
   const cardDragRef = useRef(false);
 
   const isKnownPlayer = useMemo(() => {
@@ -461,6 +484,7 @@ export default function RoomPage() {
     setTheirLikes(partnerLikes);
     setTheirDislikes(partnerDislikes);
     swipedIdsRef.current = new Set([...meLikes, ...meDislikes]);
+    theirLikesRef.current = partnerLikes;
 
     const foodIds = [...new Set([...meLikes, ...meDislikes, ...partnerLikes, ...partnerDislikes])];
     if (foodIds.length > 0) {
@@ -490,6 +514,7 @@ export default function RoomPage() {
     const selectedDishKinds = dishKindFilterOptions.filter((option) => dishKindFilters.includes(option.value));
     const targetSize = 36;
     const pageSize = selectedDishKinds.length > 1 ? 120 : targetSize;
+    const partnerLikeIds = theirLikesRef.current.filter((foodId) => !swipedIdsRef.current.has(foodId));
     const mealTypes = [...new Set(selectedDishKinds.flatMap((option) => option.mealTypes ?? []))];
     const tagsAny = [...new Set(selectedDishKinds.flatMap((option) => option.tagsAny ?? []))];
     const orFilters = [
@@ -497,7 +522,13 @@ export default function RoomPage() {
       tagsAny.length > 0 ? `tags.ov.{${tagsAny.join(",")}}` : "",
     ].filter(Boolean);
 
-    const buildFoodQueries = (imageMode: "with-image" | "without-image") => {
+    const matchesActiveFilters = (food: Food) => {
+      if (!matchesOption(food, selectedFoodType)) return false;
+      if (!matchesAnyOption(food, selectedDishKinds)) return false;
+      return true;
+    };
+
+    const buildFoodQueries = (imageMode: "with-image" | "without-image", excludedIds: string[], requiredTags: string[] = []) => {
       let countQuery = supabaseClient.from("foods").select("id", { count: "exact", head: true }).in("source", visibleFoodSources);
       let query = supabaseClient.from("foods").select("*").in("source", visibleFoodSources);
 
@@ -537,12 +568,45 @@ export default function RoomPage() {
         query = query.not("id", "in", `(${swipedIds.join(",")})`);
       }
 
+      if (excludedIds.length > 0) {
+        countQuery = countQuery.not("id", "in", `(${excludedIds.join(",")})`);
+        query = query.not("id", "in", `(${excludedIds.join(",")})`);
+      }
+
+      if (requiredTags.length > 0) {
+        countQuery = countQuery.overlaps("tags", requiredTags);
+        query = query.overlaps("tags", requiredTags);
+      }
+
       return { countQuery, query };
     };
 
-    const loadRandomFoods = async (imageMode: "with-image" | "without-image", desiredCount: number) => {
+    const loadFoodsByIds = async (foodIds: string[], desiredCount: number) => {
+      if (foodIds.length === 0 || desiredCount <= 0) return { foods: [] as Food[], errorMessage: "" };
+      const { data, error: foodsError } = await supabaseClient
+        .from("foods")
+        .select("*")
+        .in("source", visibleFoodSources)
+        .in("id", foodIds)
+        .limit(desiredCount);
+
+      if (foodsError || !data) {
+        return {
+          foods: [] as Food[],
+          errorMessage: foodsError ? formatSupabaseError("Не вдалося завантажити вподобання партнера", foodsError) : "Не вдалося завантажити вподобання партнера.",
+        };
+      }
+
+      const foodsById = new Map((data as Food[]).map((food) => [food.id, food]));
+      return {
+        foods: foodIds.map((foodId) => foodsById.get(foodId)).filter(isFood).filter(matchesActiveFilters).slice(0, desiredCount),
+        errorMessage: "",
+      };
+    };
+
+    const loadRandomFoods = async (imageMode: "with-image" | "without-image", desiredCount: number, excludedIds: string[] = [], requiredTags: string[] = []) => {
       if (desiredCount <= 0) return { foods: [] as Food[], errorMessage: "" };
-      const { countQuery, query } = buildFoodQueries(imageMode);
+      const { countQuery, query } = buildFoodQueries(imageMode, excludedIds, requiredTags);
       const { count, error: countError } = await countQuery;
 
       if (countError) {
@@ -570,14 +634,47 @@ export default function RoomPage() {
       };
     };
 
-    const imageFoods = await loadRandomFoods("with-image", targetSize);
+    const partnerLikedFoods = await loadFoodsByIds(partnerLikeIds, targetSize);
+    if (partnerLikedFoods.errorMessage) {
+      setLoadingFoods(false);
+      setError(partnerLikedFoods.errorMessage);
+      return;
+    }
+
+    const priorityFoods = partnerLikedFoods.foods;
+    const priorityIds = priorityFoods.map((food) => food.id);
+    const similarTags = rankSimilarTags(priorityFoods.length > 0 ? priorityFoods : partnerLikeIds.map((foodId) => foodMapRef.current[foodId]).filter(isFood));
+    const similarTargetSize = Math.max(targetSize - priorityFoods.length, 0);
+    const similarImageFoods = await loadRandomFoods("with-image", similarTargetSize, priorityIds, similarTags);
+    if (similarImageFoods.errorMessage) {
+      setLoadingFoods(false);
+      setError(similarImageFoods.errorMessage);
+      return;
+    }
+
+    const similarPlaceholderFoods = await loadRandomFoods(
+      "without-image",
+      similarTargetSize - similarImageFoods.foods.length,
+      [...priorityIds, ...similarImageFoods.foods.map((food) => food.id)],
+      similarTags,
+    );
+    if (similarPlaceholderFoods.errorMessage) {
+      setLoadingFoods(false);
+      setError(similarPlaceholderFoods.errorMessage);
+      return;
+    }
+
+    const similarFoods = dedupeFoods([...similarImageFoods.foods, ...similarPlaceholderFoods.foods]).slice(0, similarTargetSize);
+    const boostedIds = [...priorityIds, ...similarFoods.map((food) => food.id)];
+    const generalTargetSize = Math.max(targetSize - boostedIds.length, 0);
+    const imageFoods = await loadRandomFoods("with-image", generalTargetSize, boostedIds);
     if (imageFoods.errorMessage) {
       setLoadingFoods(false);
       setError(imageFoods.errorMessage);
       return;
     }
 
-    const placeholderFoods = await loadRandomFoods("without-image", targetSize - imageFoods.foods.length);
+    const placeholderFoods = await loadRandomFoods("without-image", generalTargetSize - imageFoods.foods.length, [...boostedIds, ...imageFoods.foods.map((food) => food.id)]);
     setLoadingFoods(false);
 
     if (placeholderFoods.errorMessage) {
@@ -585,7 +682,7 @@ export default function RoomPage() {
       return;
     }
 
-    const incomingFoods = dedupeFoods([...imageFoods.foods, ...placeholderFoods.foods]).slice(0, targetSize);
+    const incomingFoods = dedupeFoods([...priorityFoods, ...similarFoods, ...imageFoods.foods, ...placeholderFoods.foods]).slice(0, targetSize);
     setFoods((prev) => {
       if (mode === "replace") return incomingFoods;
       return dedupeFoods([...prev, ...incomingFoods]);
@@ -707,6 +804,14 @@ export default function RoomPage() {
   useEffect(() => {
     myLikesRef.current = myLikes;
   }, [myLikes]);
+
+  useEffect(() => {
+    theirLikesRef.current = theirLikes;
+  }, [theirLikes]);
+
+  useEffect(() => {
+    foodMapRef.current = foodMap;
+  }, [foodMap]);
 
   useEffect(() => {
     if (!recentMatch) return;

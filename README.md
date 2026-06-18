@@ -21,6 +21,10 @@ npm install
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+ADMIN_PASSWORD=choose_a_strong_password
+ADMIN_SESSION_SECRET=choose_a_long_random_secret
+ADMIN_HOST=admin.foodmatch.food
 ```
 
 3. Run SQL schema from `supabase/schema.sql` in Supabase SQL Editor. If room creation fails with an RLS/policy error, rerun the latest schema so the anon policies are applied.
@@ -54,6 +58,18 @@ OFF_CATEGORY_TAGS="meals" SEED_LIMIT=100 npm run seed:products
 ```bash
 npm run dev
 ```
+
+### Admin panel
+
+The admin editor is served on `ADMIN_HOST` (for production, point `admin.foodmatch.food` or your chosen admin subdomain at the same Vercel project). Direct `/admin` access on the regular production host redirects home.
+
+Required server-only env:
+
+- `SUPABASE_SERVICE_ROLE_KEY` for server-side food updates.
+- `ADMIN_PASSWORD` for login.
+- `ADMIN_SESSION_SECRET` for signed admin cookies.
+
+Locally, `/admin` remains available on `localhost` for development.
 
 ### Seed script details
 

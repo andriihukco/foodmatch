@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Loader2, Sparkles } from "lucide-react";
+import { ArrowRight, Cherry, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { saveLocalRoom } from "@/lib/local-rooms";
 import { formatSupabaseError, hasSupabaseEnv, supabase } from "@/lib/supabase";
 
 export default function Home() {
@@ -48,24 +49,28 @@ export default function Home() {
       return;
     }
 
-    window.localStorage.setItem(`foodmatch:room:${data.id}:player`, trimmedName);
+    saveLocalRoom({
+      id: data.id,
+      playerName: trimmedName,
+      label: `${trimmedName}'s room`,
+    });
     router.push(`/room/${data.id}`);
   };
 
   return (
-    <main className="flex min-h-screen w-full items-center justify-center overflow-hidden bg-[#f4fbef] px-5 py-8">
+    <main className="flex min-h-screen w-full items-center justify-center overflow-hidden bg-[#fff5f6] px-5 py-8 text-[#351316]">
       <section className="relative w-full max-w-md">
-        <div className="absolute -left-14 -top-16 h-40 w-40 rounded-full bg-[#d9f8c8] blur-2xl" />
-        <div className="absolute -bottom-16 -right-14 h-44 w-44 rounded-full bg-[#fff1ad] blur-2xl" />
+        <div className="absolute -left-14 -top-16 h-40 w-40 rounded-full bg-[#ffd1d8] blur-2xl" />
+        <div className="absolute -bottom-16 -right-14 h-44 w-44 rounded-full bg-[#ffe3b3] blur-2xl" />
 
-        <div className="relative overflow-hidden rounded-[2.25rem] border border-white/80 bg-white/85 p-6 shadow-[0_24px_80px_rgba(55,91,35,0.16)] backdrop-blur-xl">
-          <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-[1.65rem] bg-[#58cc02] shadow-[0_10px_0_#46a302]">
-            <Sparkles className="h-9 w-9 text-white" />
+        <div className="relative overflow-hidden rounded-[2.25rem] border border-white/80 bg-white/90 p-6 shadow-[0_24px_80px_rgba(154,25,42,0.16)] backdrop-blur-xl">
+          <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-[1.65rem] bg-[#e11d48] shadow-[0_10px_0_#9f1239]">
+            <Cherry className="h-9 w-9 text-white" />
           </div>
 
           <div className="space-y-3 text-center">
-            <h1 className="text-4xl font-black tracking-tight text-[#1f2a1b]">FoodMatch</h1>
-            <p className="mx-auto max-w-xs text-base font-bold leading-6 text-[#64725d]">
+            <h1 className="text-4xl font-black tracking-tight text-[#351316]">FoodMatch</h1>
+            <p className="mx-auto max-w-xs text-base font-bold leading-6 text-[#7a3a43]">
               Шлях до твого серця лежить через шлунок. Створіть кімнату і знайдіть страву, яка подобається обом.
             </p>
           </div>
@@ -75,7 +80,7 @@ export default function Home() {
               value={name}
               onChange={(event) => setName(event.target.value)}
               placeholder="Твоє ім'я"
-              className="h-14 rounded-2xl border-2 border-[#d8efc8] bg-white px-4 text-lg font-bold shadow-inner"
+              className="h-14 rounded-2xl border-2 border-[#ffd1d8] bg-white px-4 text-lg font-bold shadow-inner"
             />
             {error ? <p className="text-sm font-bold text-[#ea2b2b]">{error}</p> : null}
             {!hasSupabaseEnv ? (
@@ -86,14 +91,14 @@ export default function Home() {
             <Button
               onClick={createRoom}
               disabled={loading || !hasSupabaseEnv}
-              className="btn-duo-green h-14 w-full rounded-2xl text-lg disabled:opacity-60"
+              className="btn-duo-primary h-14 w-full rounded-2xl text-lg disabled:opacity-60"
             >
               {loading ? <Loader2 className="animate-spin" /> : <ArrowRight className="h-5 w-5" />}
               Створити інвайт
             </Button>
           </div>
 
-          <p className="mt-5 text-center text-xs font-bold text-[#8a9684]">
+          <p className="mt-5 text-center text-xs font-bold text-[#9f5660]">
             Надішли посилання своїй людині і свайпайте до першого смачного метчу.
           </p>
         </div>

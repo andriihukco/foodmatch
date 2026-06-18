@@ -49,24 +49,24 @@
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --background: oklch(0.98 0.018 16);
+  --foreground: oklch(0.22 0.055 18);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.22 0.055 18);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.22 0.055 18);
+  --primary: oklch(0.58 0.22 18);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.94 0.035 16);
+  --secondary-foreground: oklch(0.34 0.095 18);
+  --muted: oklch(0.95 0.025 16);
+  --muted-foreground: oklch(0.48 0.065 18);
+  --accent: oklch(0.92 0.055 16);
+  --accent-foreground: oklch(0.34 0.095 18);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --border: oklch(0.88 0.045 16);
+  --input: oklch(0.88 0.045 16);
+  --ring: oklch(0.68 0.17 18);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -75,7 +75,7 @@
   --radius: 0.625rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary: oklch(0.58 0.22 18);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.97 0 0);
   --sidebar-accent-foreground: oklch(0.205 0 0);
@@ -122,7 +122,7 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-[#f7f7f7] text-foreground;
+    @apply bg-background text-foreground;
   }
   html {
     font-family: var(--font-nunito), sans-serif;
@@ -130,20 +130,20 @@
 }
 
 @layer components {
-  .btn-duo-green {
-    @apply rounded-2xl border-b-4 border-[#46a302] bg-[#58cc02] font-bold text-white transition-all active:translate-y-1 active:border-b-0;
+  .btn-duo-primary {
+    @apply rounded-2xl border-b-4 border-[#9f1239] bg-[#e11d48] font-bold text-white transition-all hover:bg-[#be123c] active:translate-y-1 active:border-b-0;
   }
 
   .btn-duo-danger {
-    @apply rounded-2xl border-b-4 border-[#ea2b2b] bg-[#ff4b4b] font-bold text-white transition-all active:translate-y-1 active:border-b-0;
+    @apply rounded-2xl border-b-4 border-[#b42318] bg-[#ef4444] font-bold text-white transition-all active:translate-y-1 active:border-b-0;
   }
 
   .btn-duo-yellow {
-    @apply rounded-2xl border-b-4 border-[#e6a800] bg-[#ffcc00] font-bold text-[#5b4500] transition-all active:translate-y-1 active:border-b-0;
+    @apply rounded-2xl border-b-4 border-[#d97706] bg-[#fbbf24] font-bold text-[#5b2a00] transition-all active:translate-y-1 active:border-b-0;
   }
 
   .card-duo {
-    @apply rounded-3xl border-2 border-[#e5e5e5] bg-white shadow-[0_4px_0_0_#e5e5e5];
+    @apply rounded-3xl border-2 border-[#ffd1d8] bg-white shadow-[0_4px_0_0_#ffd1d8];
   }
 
   .no-scrollbar {
